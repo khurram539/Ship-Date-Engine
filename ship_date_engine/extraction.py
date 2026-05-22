@@ -99,6 +99,19 @@ def _header_key(header: str, col_idx: int) -> str:
     return cleaned if cleaned else f"column_{col_idx + 1}"
 
 
+def _format_detail_value(key: str, value: str) -> str:
+    text = value.strip()
+    if not text:
+        return text
+
+    # Convert numeric/date-like values for date columns (e.g. Excel serials).
+    if "date" in key:
+        parsed = _parse_date_flexible(text)
+        if parsed:
+            return parsed.strftime("%m-%d-%Y")
+    return text
+
+
 def _read_xml_text(path: Path) -> str:
     root = ET.fromstring(path.read_text(encoding="utf-8", errors="ignore"))
     lines: list[str] = []
@@ -388,7 +401,7 @@ def lookup_shipping_date_record_by_id(file_path: str, shipping_id: str) -> dict[
                             continue
                         header = header_row[col_idx] if col_idx < len(header_row) else ""
                         key = _header_key(header, col_idx)
-                        detail_pairs.append(f"{key}={value_text}")
+                        detail_pairs.append(f"{key}={_format_detail_value(key, value_text)}")
                     details = " | ".join(detail_pairs)
 
                     matches.append(
@@ -538,6 +551,121 @@ def lookup_shipping_date_by_id(file_path: str, shipping_id: str) -> str | None:
     if record.get("status") != "ok":
         return None
     return record.get("shipping_date")
+
+
+def list_shipping_date_records(file_path: str) -> list[dict[str, str]]:
+    path = Path(file_path)
+    if path.suffix.lower() != ".xlsx":
+        return []
+
+    shipping_headers = {
+        "shipping id",
+        "shipment id",
+        "ship id",
+        "order number",
+        "order #",
+        "order no",
+        "order #/id",
+        "order id",
+        "sales order",
+    }
+    date_headers = {
+        "shipping date",
+        "ship date",
+        "ship by date",
+        "final shipping date",
+        "actual ship date",
+        "promised ship date",
+        "delivery date",
+    }
+
+    records: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for sheet_name, rows in _read_xlsx_rows(path):
+        if not rows:
+            continue
+
+        header_idx = -1
+        shipping_col = -1
+        date_col = -1
+        header_row: list[str] = []
+
+        for idx, row in enumerate(rows[:50]):
+            normalized = [_normalize_key(cell) for cell in row]
+            local_shipping_col = -1
+            local_date_col = -1
+
+            for col, cell in enumerate(normalized):
+                if local_shipping_col < 0 and any(h in cell for h in shipping_headers):
+                    local_shipping_col = col
+                if local_date_col < 0 and any(h in cell for h in date_headers):
+                    local_date_col = col
+
+            if local_shipping_col >= 0 and local_date_col >= 0:
+                header_idx = idx
+                shipping_col = local_shipping_col
+                date_col = local_date_col
+                header_row = row
+                break
+
+            if local_shipping_col >= 0 and header_idx < 0:
+                header_idx = idx
+                shipping_col = local_shipping_col
+                date_col = local_date_col
+                header_row = row
+
+        if header_idx < 0 or shipping_col < 0:
+            continue
+
+        for row in rows[header_idx + 1 :]:
+            if shipping_col >= len(row):
+                continue
+
+            raw_id = row[shipping_col].strip()
+            shipping_id = _normalize_lookup_id(raw_id)
+            if not shipping_id:
+                continue
+
+            shipping_date = ""
+            if 0 <= date_col < len(row):
+                parsed = _parse_date_flexible(row[date_col].strip())
+                if parsed:
+                    shipping_date = parsed.strftime("%m-%d-%Y")
+
+            if not shipping_date:
+                first_date = next((d for d in (_parse_date_flexible(cell) for cell in row) if d), None)
+                if first_date:
+                    shipping_date = first_date.strftime("%m-%d-%Y")
+
+            if not shipping_date:
+                continue
+
+            dedupe_key = (shipping_id, shipping_date, sheet_name)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+
+            detail_pairs: list[str] = []
+            for col_idx, value in enumerate(row):
+                value_text = value.strip()
+                if not value_text:
+                    continue
+                header = header_row[col_idx] if col_idx < len(header_row) else ""
+                key = _header_key(header, col_idx)
+                detail_pairs.append(f"{key}={_format_detail_value(key, value_text)}")
+
+            records.append(
+                {
+                    "shipping_id": shipping_id,
+                    "shipping_date": shipping_date,
+                    "sheet": sheet_name,
+                    "details": " | ".join(detail_pairs),
+                }
+            )
+
+    records.sort(key=lambda item: (item.get("shipping_date", ""), item.get("shipping_id", "")))
+    return records
 
 
 def _read_text(path: Path) -> str:
