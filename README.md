@@ -22,7 +22,6 @@ A modular Python application that takes **two invoices** (text, PDF, or image), 
 ## Run
 
 ```bash
-cd /home/runner/work/Ship-Date-Engine/Ship-Date-Engine
 python -m ship_date_engine.cli /path/to/invoice_a.txt /path/to/invoice_b.txt
 ```
 
@@ -35,6 +34,5 @@ python -m ship_date_engine.cli invoice_a.txt invoice_b.txt --json-out result.jso
 ## Test
 
 ```bash
-cd /home/runner/work/Ship-Date-Engine/Ship-Date-Engine
 python -m unittest -q
 ```
