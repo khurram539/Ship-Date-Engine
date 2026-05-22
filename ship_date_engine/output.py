@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from .models import InvoiceData, ShippingDecision, ValidationResult
+
+
+def _fmt(d: date) -> str:
+    return d.strftime("%m-%d-%Y")
 
 
 def to_json_output(
@@ -29,9 +34,9 @@ def to_text_output(
     lines = [
         "Shipping Date Engine Result",
         "=" * 26,
-        f"Final Shipping Date: {decision.final_shipping_date.isoformat()}",
-        f"Earliest Ship Date: {decision.earliest_ship_date.isoformat()}",
-        f"Latest Allowable Ship Date: {decision.latest_allowable_ship_date.isoformat()}",
+        f"Final Shipping Date: {_fmt(decision.final_shipping_date)}",
+        f"Earliest Ship Date: {_fmt(decision.earliest_ship_date)}",
+        f"Latest Allowable Ship Date: {_fmt(decision.latest_allowable_ship_date)}",
         "",
         "Explanation:",
         *[f"- {step}" for step in decision.explanation],
@@ -45,7 +50,7 @@ def to_text_output(
     lines.extend(["", "Invoices:"])
     lines.extend(
         [
-            f"- {inv.source_path} (invoice={inv.invoice_number or 'N/A'}, po={inv.po_number or 'N/A'}, priority={inv.priority})"
+            f"- {inv.source_path} (shipping_id={inv.shipping_id or 'N/A'}, invoice={inv.invoice_number or 'N/A'}, po={inv.po_number or 'N/A'}, priority={inv.priority})"
             for inv in invoices
         ]
     )

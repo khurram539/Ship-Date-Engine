@@ -8,6 +8,7 @@ from typing import Any
 @dataclass
 class InvoiceData:
     source_path: str
+    shipping_id: str | None = None
     invoice_number: str | None = None
     invoice_date: date | None = None
     po_number: str | None = None
