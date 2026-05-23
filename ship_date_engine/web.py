@@ -734,17 +734,18 @@ def _parse_details_map(details: str) -> dict[str, str]:
     return out
 
 
-def _pick_detail_value(details_map: dict[str, str], aliases: list[str]) -> str:
+def _pick_detail_value(details_map: dict[str, str], aliases: list[str], allow_prefix_match: bool = True) -> str:
     normalized_aliases = [_normalize_field_key(alias) for alias in aliases]
 
     for alias in normalized_aliases:
         if alias in details_map:
             return details_map[alias]
 
-    for alias in normalized_aliases:
-        for key, value in details_map.items():
-            if key.startswith(alias):
-                return value
+    if allow_prefix_match:
+        for alias in normalized_aliases:
+            for key, value in details_map.items():
+                if key.startswith(alias):
+                    return value
     return ""
 
 
@@ -761,21 +762,21 @@ def _extract_additional_fields(details: str) -> dict[str, str]:
         "cogs": _pick_detail_value(details_map, ["cogs"]),
         "commission": _pick_detail_value(details_map, ["commission"]),
         "carrier": _pick_detail_value(details_map, ["carrier", "carriers"]),
-        "channel": _pick_detail_value(details_map, ["channel", "channels"]),
+        "channel": _pick_detail_value(details_map, ["channel", "channels"], allow_prefix_match=False),
         "shipping_cost": _pick_detail_value(details_map, ["shipping cost", "shippingcost"]),
-        "tax": _pick_detail_value(details_map, ["tax"]),
-        "transaction_fee": _pick_detail_value(details_map, ["transaction fee", "transactionfee", "transaction fe"]),
+        "tax": _pick_detail_value(details_map, ["tax", "tax amount", "tax amt", "taxes", "sales tax"]),
+        "transaction_fee": _pick_detail_value(details_map, ["transaction fee", "transactionfee", "transaction fe", "transact"]),
         "transaction_date": _pick_detail_value(details_map, ["transaction date", "transactiondate"]),
-        "posting_fee": _pick_detail_value(details_map, ["posting fee", "postingfee"]),
+        "posting_fee": _pick_detail_value(details_map, ["posting fee", "postingfee", "posting f"]),
         "misc_fees": _pick_detail_value(details_map, ["misc fees", "miscfees"]),
         "grand_total": _pick_detail_value(details_map, ["grand total", "grandtotal"]),
         "sc_amount": _pick_detail_value(details_map, ["sc amount", "scamount"]),
         "price_amount": _pick_detail_value(details_map, ["price amount", "priceamount", "price am"]),
-        "fee_amount": _pick_detail_value(details_map, ["fee amount", "feeamount", "fee am"]),
-        "sc_amount_foreign": _pick_detail_value(details_map, ["sc amount in foreign currency", "scamountinforeigncurrency"]),
+        "fee_amount": _pick_detail_value(details_map, ["fee amount", "feeamount", "fee am", "fee amo"]),
+        "sc_amount_foreign": _pick_detail_value(details_map, ["sc amount in foreign currency", "scamountinforeigncurrency", "scamour", "scamou"]),
         "sett_amount": _pick_detail_value(details_map, ["sett amount", "settamount", "set amount"]),
         "settlement_amount": _pick_detail_value(details_map, ["settlement amount", "settlementamount", "settlemer amount"]),
-        "settlement": _pick_detail_value(details_map, ["settlement"]),
+        "settlement": _pick_detail_value(details_map, ["settlement"], allow_prefix_match=False),
         "amount": _pick_detail_value(details_map, ["amount"]),
         "difference": _pick_detail_value(details_map, ["difference"]),
     }
@@ -841,17 +842,14 @@ def _build_all_lookup_result_from_file(
         ("source_tab", "Source Tab"),
     ]
     extra_columns = [
-        ("settlement_id", "Settlement ID"),
         ("set_id", "Set ID"),
         ("trans_type", "Trans Type"),
         ("movement_type", "Movement Type"),
         ("order_id", "Order ID"),
-        ("channel_order", "Channel Order #"),
         ("sku", "SKU"),
         ("cogs", "COGS"),
         ("commission", "Commission"),
         ("carrier", "Carrier"),
-        ("channel", "Channel"),
         ("shipping_cost", "Shipping Cost"),
         ("tax", "Tax"),
         ("transaction_fee", "Transaction Fee"),
@@ -865,7 +863,6 @@ def _build_all_lookup_result_from_file(
         ("sc_amount_foreign", "SC Amount in Foreign Currency"),
         ("sett_amount", "Sett Amount"),
         ("settlement_amount", "Settlement Amount"),
-        ("settlement", "Settlement"),
         ("amount", "Amount"),
         ("difference", "Difference"),
     ]
@@ -887,7 +884,7 @@ def _build_all_lookup_result_from_file(
         header = "".join(f"<th>{html.escape(label)}</th>" for _, label in columns)
         body = "".join(
             "<tr>" + "".join(f"<td>{html.escape(row.get(key, ''))}</td>" for key, _ in columns) + "</tr>"
-            for row in enriched_rows[:500]
+            for row in enriched_rows
         )
         return (
             "<table class=\"history-table\">"
