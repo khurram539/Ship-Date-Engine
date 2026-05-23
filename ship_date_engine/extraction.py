@@ -99,6 +99,23 @@ def _header_key(header: str, col_idx: int) -> str:
     return cleaned if cleaned else f"column_{col_idx + 1}"
 
 
+def _excel_col_to_index(cell_ref: str) -> int | None:
+    letters = ""
+    for ch in cell_ref:
+        if ch.isalpha():
+            letters += ch.upper()
+        else:
+            break
+
+    if not letters:
+        return None
+
+    index = 0
+    for ch in letters:
+        index = index * 26 + (ord(ch) - ord("A") + 1)
+    return index - 1
+
+
 def _format_detail_value(key: str, value: str) -> str:
     text = value.strip()
     if not text:
@@ -147,10 +164,16 @@ def _read_xlsx_text(path: Path) -> str:
                 if not row.tag.endswith("}row"):
                     continue
 
-                row_values: list[str] = []
+                row_map: dict[int, str] = {}
+                append_idx = 0
                 for cell in list(row):
                     if not cell.tag.endswith("}c"):
                         continue
+
+                    col_idx = _excel_col_to_index(cell.attrib.get("r", ""))
+                    if col_idx is None:
+                        col_idx = append_idx
+                    append_idx = max(append_idx, col_idx + 1)
 
                     cell_type = cell.attrib.get("t")
                     value_node = None
@@ -161,7 +184,7 @@ def _read_xlsx_text(path: Path) -> str:
                         if child.tag.endswith("}is"):
                             text_node = next((n for n in child.iter() if n.tag.endswith("}t") and n.text is not None), None)
                             if text_node is not None:
-                                row_values.append(text_node.text.strip())
+                                row_map[col_idx] = text_node.text.strip()
                             value_node = None
                             break
 
@@ -174,7 +197,13 @@ def _read_xlsx_text(path: Path) -> str:
                             raw_value = shared_strings[int(raw_value)]
                         except (IndexError, ValueError):
                             pass
-                    row_values.append(raw_value)
+                    row_map[col_idx] = raw_value
+
+                if not row_map:
+                    continue
+
+                max_col = max(row_map.keys())
+                row_values = [row_map.get(i, "") for i in range(max_col + 1)]
 
                 cleaned = [v for v in row_values if v]
                 if not cleaned:
@@ -245,10 +274,16 @@ def _read_xlsx_rows(path: Path) -> list[tuple[str, list[list[str]]]]:
                 if not row.tag.endswith("}row"):
                     continue
 
-                row_values: list[str] = []
+                row_map: dict[int, str] = {}
+                append_idx = 0
                 for cell in list(row):
                     if not cell.tag.endswith("}c"):
                         continue
+
+                    col_idx = _excel_col_to_index(cell.attrib.get("r", ""))
+                    if col_idx is None:
+                        col_idx = append_idx
+                    append_idx = max(append_idx, col_idx + 1)
 
                     cell_type = cell.attrib.get("t")
                     value = ""
@@ -270,7 +305,13 @@ def _read_xlsx_rows(path: Path) -> list[tuple[str, list[list[str]]]]:
                         except (ValueError, IndexError):
                             pass
 
-                    row_values.append(value)
+                    row_map[col_idx] = value
+
+                if not row_map:
+                    continue
+
+                max_col = max(row_map.keys())
+                row_values = [row_map.get(i, "") for i in range(max_col + 1)]
 
                 while row_values and not row_values[-1]:
                     row_values.pop()
