@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import argparse
-import cgi
+import csv
 import html
+import io
 import json
 import re
 import shutil
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from email.parser import BytesFeedParser
+from email.policy import compat32
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .ai_assist import generate_bedrock_insight
+from .ai_assist import generate_insight
 from .engine import determine_shipping_date_single
 from .extraction import list_shipping_date_records, lookup_shipping_date_record_by_id, research_order_id_in_workbook
 from .output import to_json_output, to_text_output
@@ -21,6 +25,75 @@ RECORDS_PATH = Path(tempfile.gettempdir()) / "ship_date_engine_records.json"
 UPLOADS_DIR = Path(tempfile.gettempdir()) / "ship_date_engine_uploads"
 
 
+# ── Multipart form parser (replaces deprecated cgi module) ───────────────────
+
+@dataclass
+class _FormFile:
+    """Represents an uploaded file extracted from a multipart/form-data request."""
+    filename: str
+    data: bytes
+    content_type: str = ""
+
+
+def _parse_multipart(
+    rfile,
+    content_type: str,
+    content_length: int = -1,
+) -> dict[str, "str | _FormFile"]:
+    """Parse a multipart/form-data request body without the deprecated :mod:`cgi` module.
+
+    Returns a mapping of field-name → str (text fields) or :class:`_FormFile` (uploads).
+    Reads exactly *content_length* bytes from *rfile* when the value is non-negative.
+    """
+    body = rfile.read(content_length) if content_length >= 0 else rfile.read()
+
+    # Wrap the body in a fake top-level MIME envelope so BytesFeedParser treats
+    # it as a multipart message.
+    fake_header = (
+        f"MIME-Version: 1.0\r\nContent-Type: {content_type}\r\n\r\n"
+    ).encode("latin-1")
+
+    parser = BytesFeedParser(policy=compat32)
+    parser.feed(fake_header + body)
+    msg = parser.close()
+
+    result: dict[str, str | _FormFile] = {}
+    payload = msg.get_payload()
+    if not isinstance(payload, list):
+        return result
+
+    for part in payload:
+        if isinstance(part, str):
+            continue
+        cd = part.get("Content-Disposition", "")
+        name_m = re.search(r'name="([^"]*)"', cd) or re.search(r"name=([^\s;]+)", cd)
+        if not name_m:
+            continue
+        name = name_m.group(1)
+
+        filename_m = re.search(r'filename="([^"]*)"', cd)
+        raw_bytes: bytes = part.get_payload(decode=True) or b""
+
+        if filename_m:
+            result[name] = _FormFile(
+                filename=filename_m.group(1),
+                data=raw_bytes,
+                content_type=part.get_content_type(),
+            )
+        else:
+            result[name] = raw_bytes.decode("utf-8", errors="replace")
+
+    return result
+
+
+def _form_str(form: dict, key: str, default: str = "") -> str:
+    """Safely retrieve a text field from a parsed multipart form."""
+    value = form.get(key, default)
+    return value if isinstance(value, str) else default
+
+
+# ── HTML template ─────────────────────────────────────────────────────────────
+
 HTML_PAGE = """<!doctype html>
 <html lang=\"en\">
 <head>
@@ -28,11 +101,28 @@ HTML_PAGE = """<!doctype html>
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
   <title>Ship Date Engine</title>
   <style>
-    :root { --bg:#f6f8fb; --card:#ffffff; --text:#0f172a; --muted:#475569; --accent:#0f766e; --border:#dbe4ee; }
+        :root { --bg:#f6f8fb; --card:#ffffff; --text:#0f172a; --muted:#475569; --accent:#0f766e; --accent-2:#1d4ed8; --border:#dbe4ee; --warm:#f59e0b; }
     * { box-sizing: border-box; }
     body { margin: 0; padding: 24px; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(160deg, #eef6ff 0%, #f7f9fc 60%, #eefcf8 100%); color: var(--text); }
     .wrap { max-width: 1100px; margin: 0 auto; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; box-shadow: 0 8px 24px rgba(2, 6, 23, 0.06); }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 18px; box-shadow: 0 8px 24px rgba(2, 6, 23, 0.06); }
+        .hero { display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 18px; margin-bottom: 18px; }
+        .hero-panel { padding: 22px; border-radius: 22px; border: 1px solid #d7e3f0; background: linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(240,249,255,0.92) 45%, rgba(236,253,245,0.95) 100%); box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08); }
+        .hero-kicker { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 12px; background: rgba(15, 118, 110, 0.08); color: #0f766e; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+        .hero-kicker::before { content: ''; width: 8px; height: 8px; border-radius: 999px; background: var(--warm); box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.16); }
+        .hero-title { margin: 14px 0 10px; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.02; letter-spacing: -0.04em; }
+        .hero-copy { margin: 0; font-size: 16px; line-height: 1.6; max-width: 60ch; color: var(--muted); }
+        .hero-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+        .stat-card { background: rgba(255,255,255,0.88); border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 16px; padding: 14px; }
+        .stat-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; }
+        .stat-value { display: block; margin-top: 6px; font-size: 18px; font-weight: 700; color: #0f172a; }
+        .stat-note { display: block; margin-top: 3px; font-size: 13px; color: var(--muted); }
+        .hero-side { display: grid; gap: 12px; }
+        .info-card { padding: 16px; border-radius: 18px; border: 1px solid #d7e3f0; background: rgba(255,255,255,0.92); box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05); }
+        .info-card h3 { margin: 0 0 8px 0; font-size: 15px; }
+        .info-card p { margin: 0; line-height: 1.55; }
+        .info-list { margin: 10px 0 0; padding-left: 18px; color: var(--muted); }
+        .info-list li { margin: 6px 0; }
         .owner-banner { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: linear-gradient(90deg, #fff 0%, #f8fafc 100%); }
         .owner-mark { width: 56px; height: 56px; flex: 0 0 56px; }
         .owner-text { font-size: 14px; color: #334155; letter-spacing: 0.02em; }
@@ -67,6 +157,8 @@ HTML_PAGE = """<!doctype html>
         .history-table th { background: #f8fafc; color: #334155; font-weight: 600; }
         .history-link { color: #0f766e; text-decoration: none; font-weight: 600; }
         .history-link:hover { text-decoration: underline; }
+        .export-link { display: inline-block; margin-top: 10px; color: #0f766e; font-size: 13px; text-decoration: none; font-weight: 600; }
+        .export-link:hover { text-decoration: underline; }
                 .loading-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.62); display: none; align-items: center; justify-content: center; z-index: 1000; }
                 .loading-overlay.active { display: flex; }
                 .loading-card { width: min(460px, 92vw); background: #ffffff; border-radius: 14px; border: 1px solid #dbe4ee; padding: 18px; box-shadow: 0 12px 32px rgba(2, 6, 23, 0.24); text-align: center; }
@@ -75,12 +167,48 @@ HTML_PAGE = """<!doctype html>
                 .loading-eta { margin-top: 8px; color: #0f766e; font-weight: 700; }
                 .spinner { width: 42px; height: 42px; margin: 0 auto; border: 4px solid #dbeafe; border-top-color: #0f766e; border-radius: 50%; animation: spin 0.9s linear infinite; }
                 @keyframes spin { to { transform: rotate(360deg); } }
-    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+        .section-label { margin: 18px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; }
+        .section-label:first-child { margin-top: 0; }
+        @media (max-width: 900px) { .grid, .hero, .hero-stats { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <main class=\"wrap\">
-    <section class=\"card\">
+        <section class="hero">
+            <div class="hero-panel">
+                <div class="owner-banner" role="img" aria-label="Kaytheon LLC ownership logo">
+                        <svg class="owner-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="14" y="24" width="24" height="52" rx="2" fill="#000000"/>
+                                <path d="M38 50 C50 50, 52 38, 66 24 L86 24 C72 33, 66 42, 60 50 C66 58, 72 67, 86 76 L66 76 C52 62, 50 50, 38 50 Z" fill="#f7c044"/>
+                                <circle cx="38" cy="50" r="11" fill="#f7c044"/>
+                        </svg>
+                        <div class="owner-text"><strong>Kaytheon LLC</strong></div>
+                </div>
+                <div class="hero-kicker">New code update</div>
+                <h1 class="hero-title">Ship Date Engine</h1>
+                <p class="hero-copy">Upload a workbook or invoice, look up a single Shipping ID, or generate an all-ID summary by period. The web app now reflects the newer parsing and AI-assist workflow, including cached lookups and CSV-friendly exports.</p>
+                <div class="hero-stats">
+                    <div class="stat-card"><span class="stat-label">Input formats</span><span class="stat-value">TXT, CSV, JSON, XML, XLSX, XLS</span><span class="stat-note">Plus PDF and common image files</span></div>
+                    <div class="stat-card"><span class="stat-label">Lookup modes</span><span class="stat-value">Single or all IDs</span><span class="stat-note">Group all-ID reports by period</span></div>
+                    <div class="stat-card"><span class="stat-label">Results</span><span class="stat-value">Table + JSON output</span><span class="stat-note">Optional AI assist and totals</span></div>
+                </div>
+            </div>
+            <div class="hero-side">
+                <div class="info-card">
+                    <h3>What changed</h3>
+                    <p>The page now points users to the updated code paths: smarter file parsing, cached history, and a cleaner export flow.</p>
+                </div>
+                <div class="info-card">
+                    <h3>Quick workflow</h3>
+                    <ul class="info-list">
+                        <li>Upload one file per request.</li>
+                        <li>Choose single-ID or all-ID mode.</li>
+                        <li>Optionally enable AI Assist and totals.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+        <section class="card">
             <div class="owner-banner" role="img" aria-label="Kaytheon LLC ownership logo">
                 <svg class="owner-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <rect x="14" y="24" width="24" height="52" rx="2" fill="#000000"/>
@@ -90,7 +218,7 @@ HTML_PAGE = """<!doctype html>
                 <div class="owner-text"><strong>Kaytheon LLC</strong></div>
             </div>
       <h1>Ship Date Engine</h1>
-                        <p>Upload one invoice file (TXT, XML, XLSX, XLS) and optionally enter a Shipping/Order ID for deep lookup.</p>
+                                                <p>Upload one invoice file (TXT, CSV, JSON, XML, XLSX, XLS, PDF, or image) and optionally enter a Shipping/Order ID for deep lookup.</p>
             <div class="tabs">
                 <button type="button" class="tab-btn active" id="tab-btn-lookup" onclick="switchTab('lookup')">Lookup</button>
                 <button type="button" class="tab-btn" id="tab-btn-history" onclick="switchTab('history')">Recent Lookups</button>
@@ -100,7 +228,7 @@ HTML_PAGE = """<!doctype html>
                 <input type="hidden" name="action" value="compute" />
                 <div>
                     <h3>Invoice File</h3>
-                    <input type="file" name="invoice_file" accept=".txt,.xml,.xlsx,.xls,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp" />
+                    <input type="file" name="invoice_file" accept=".txt,.csv,.json,.xml,.xlsx,.xls,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp" />
         </div>
                 <div>
                     <h3>Shipping ID</h3>
@@ -130,7 +258,7 @@ HTML_PAGE = """<!doctype html>
                 </div>
                 <div style="margin-top:10px;">
                     <label>
-                        <input type="checkbox" name="enable_ai" __ENABLE_AI__ /> Enable Bedrock AI Assist
+                        <input type="checkbox" name="enable_ai" __ENABLE_AI__ /> Enable AI Assist
                     </label>
                 </div>
                 <div style="margin-top:10px;">
@@ -145,6 +273,7 @@ HTML_PAGE = """<!doctype html>
                         <section class="tab-panel" id="tab-history">
                                 <h3>Recent Shipping/Order Lookups</h3>
                                 __HISTORY_TABLE__
+                                <a href="/export.csv" class="export-link">⬇ Export history as CSV</a>
                         </section>
                         <footer class="site-footer">
                             <div class="disclaimer">
@@ -274,6 +403,8 @@ HTML_PAGE = """<!doctype html>
 """
 
 
+# ── Persistence helpers ───────────────────────────────────────────────────────
+
 def _render(
     shipping_id: str = "",
     result_block: str = "",
@@ -284,25 +415,18 @@ def _render(
 ) -> bytes:
     history_table = _render_history_table()
     shipping_id_options = _render_shipping_id_options()
-    lookup_mode_single = "selected" if lookup_mode == "single" else ""
-    lookup_mode_all = "selected" if lookup_mode == "all" else ""
-    group_by_daily = "selected" if group_by == "daily" else ""
-    group_by_weekly = "selected" if group_by == "weekly" else ""
-    group_by_monthly = "selected" if group_by == "monthly" else ""
-    group_by_quarterly = "selected" if group_by == "quarterly" else ""
-    group_by_annual = "selected" if group_by == "annual" else ""
     html_doc = (
         HTML_PAGE.replace("__SHIPPING_ID__", html.escape(shipping_id))
         .replace("__ENABLE_AI__", "checked" if enable_ai else "")
         .replace("__INCLUDE_TOTALS__", "checked" if include_totals else "")
         .replace("__SHIPPING_ID_OPTIONS__", shipping_id_options)
-        .replace("__LOOKUP_MODE_SINGLE__", lookup_mode_single)
-        .replace("__LOOKUP_MODE_ALL__", lookup_mode_all)
-        .replace("__GROUP_BY_DAILY__", group_by_daily)
-        .replace("__GROUP_BY_WEEKLY__", group_by_weekly)
-        .replace("__GROUP_BY_MONTHLY__", group_by_monthly)
-        .replace("__GROUP_BY_QUARTERLY__", group_by_quarterly)
-        .replace("__GROUP_BY_ANNUAL__", group_by_annual)
+        .replace("__LOOKUP_MODE_SINGLE__", "selected" if lookup_mode == "single" else "")
+        .replace("__LOOKUP_MODE_ALL__", "selected" if lookup_mode == "all" else "")
+        .replace("__GROUP_BY_DAILY__", "selected" if group_by == "daily" else "")
+        .replace("__GROUP_BY_WEEKLY__", "selected" if group_by == "weekly" else "")
+        .replace("__GROUP_BY_MONTHLY__", "selected" if group_by == "monthly" else "")
+        .replace("__GROUP_BY_QUARTERLY__", "selected" if group_by == "quarterly" else "")
+        .replace("__GROUP_BY_ANNUAL__", "selected" if group_by == "annual" else "")
         .replace("__HISTORY_TABLE__", history_table)
         .replace("__RESULT__", result_block)
     )
@@ -323,7 +447,9 @@ def _save_records(records: dict[str, dict[str, str]]) -> None:
     RECORDS_PATH.write_text(json.dumps(records, indent=2), encoding="utf-8")
 
 
-def _record_shipping_date(shipping_id: str, final_shipping_date: str, source_path: str) -> None:
+def _record_shipping_date(
+    shipping_id: str, final_shipping_date: str, source_path: str
+) -> None:
     _record_shipping_date_with_file(shipping_id, final_shipping_date, source_path, None)
 
 
@@ -349,7 +475,6 @@ def _record_shipping_date_with_file(
 def _record_saved_file(shipping_id: str, saved_file_path: str) -> None:
     if not shipping_id.strip() or not saved_file_path.strip():
         return
-
     records = _load_records()
     existing = records.get(shipping_id.strip(), {})
     records[shipping_id.strip()] = {
@@ -383,7 +508,6 @@ def _persist_uploaded_file(file_path: Path, shipping_id: str) -> Path:
 def _iter_saved_upload_files(limit: int = 50) -> list[Path]:
     if not UPLOADS_DIR.exists():
         return []
-
     files = [path for path in UPLOADS_DIR.iterdir() if path.is_file()]
     files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
     return files[:limit]
@@ -437,8 +561,136 @@ def _render_shipping_id_options() -> str:
         key=lambda item: item[1].get("updated_at", ""),
         reverse=True,
     )
-    options = [f"<option value=\"{html.escape(shipping_id)}\"></option>" for shipping_id, _ in rows[:200]]
-    return "".join(options)
+    return "".join(
+        f"<option value=\"{html.escape(sid)}\"></option>"
+        for sid, _ in rows[:200]
+    )
+
+
+# ── Result builders ───────────────────────────────────────────────────────────
+
+def _parse_mmddyyyy_or_serial(value: str) -> str | None:
+    text = value.strip()
+    if not text:
+        return None
+
+    for fmt in ("%m-%d-%Y", "%Y-%m-%d", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%m-%d-%Y")
+        except ValueError:
+            continue
+
+    if re.fullmatch(r"\d+(\.\d+)?", text):
+        try:
+            serial = int(float(text))
+            if 30000 <= serial <= 90000:
+                converted = datetime(1899, 12, 30) + timedelta(days=serial)
+                return converted.strftime("%m-%d-%Y")
+        except (ValueError, OverflowError):
+            return None
+    return None
+
+
+def _period_bucket(date_text: str, group_by: str) -> str:
+    parsed = _parse_mmddyyyy_or_serial(date_text)
+    if not parsed:
+        return "Unknown"
+
+    dt = datetime.strptime(parsed, "%m-%d-%Y")
+    if group_by == "weekly":
+        iso_year, iso_week, _ = dt.isocalendar()
+        return f"{iso_year}-W{iso_week:02d}"
+    if group_by == "monthly":
+        return dt.strftime("%Y-%m")
+    if group_by == "quarterly":
+        quarter = ((dt.month - 1) // 3) + 1
+        return f"{dt.year}-Q{quarter}"
+    if group_by == "annual":
+        return dt.strftime("%Y")
+    return dt.strftime("%m-%d-%Y")
+
+
+def _parse_amount_value(value: str) -> float | None:
+    text = value.strip()
+    if not text:
+        return None
+    negative = False
+    if text.startswith("(") and text.endswith(")"):
+        negative = True
+        text = text[1:-1]
+    cleaned = text.replace(",", "").replace("$", "").strip()
+    if not re.fullmatch(r"[-+]?\d+(\.\d+)?", cleaned):
+        return None
+    number = float(cleaned)
+    return -number if negative else number
+
+
+def _normalize_field_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.strip().lower())
+
+
+def _parse_details_map(details: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for part in (p.strip() for p in details.split("|") if p.strip()):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        normalized = _normalize_field_key(key)
+        if normalized and value.strip():
+            out[normalized] = value.strip()
+    return out
+
+
+def _pick_detail_value(
+    details_map: dict[str, str],
+    aliases: list[str],
+    allow_prefix_match: bool = True,
+) -> str:
+    normalized_aliases = [_normalize_field_key(alias) for alias in aliases]
+
+    for alias in normalized_aliases:
+        if alias in details_map:
+            return details_map[alias]
+
+    if allow_prefix_match:
+        for alias in normalized_aliases:
+            for key, value in details_map.items():
+                if key.startswith(alias):
+                    return value
+    return ""
+
+
+def _extract_additional_fields(details: str) -> dict[str, str]:
+    details_map = _parse_details_map(details)
+    return {
+        "settlement_id": _pick_detail_value(details_map, ["settlement id", "settlementid", "settlementid1"]),
+        "set_id": _pick_detail_value(details_map, ["set id", "setid"]),
+        "trans_type": _pick_detail_value(details_map, ["trans type", "transtype"]),
+        "movement_type": _pick_detail_value(details_map, ["movement type", "movementtype"]),
+        "order_id": _pick_detail_value(details_map, ["order id", "orderid"]),
+        "channel_order": _pick_detail_value(details_map, ["channel order", "channel order #", "channelorder", "channelorder#"]),
+        "sku": _pick_detail_value(details_map, ["sku"]),
+        "cogs": _pick_detail_value(details_map, ["cogs"]),
+        "commission": _pick_detail_value(details_map, ["commission"]),
+        "carrier": _pick_detail_value(details_map, ["carrier", "carriers"]),
+        "channel": _pick_detail_value(details_map, ["channel", "channels"], allow_prefix_match=False),
+        "shipping_cost": _pick_detail_value(details_map, ["shipping cost", "shippingcost"]),
+        "tax": _pick_detail_value(details_map, ["tax", "tax amount", "tax amt", "taxes", "sales tax"]),
+        "transaction_fee": _pick_detail_value(details_map, ["transaction fee", "transactionfee", "transaction fe", "transact"]),
+        "transaction_date": _pick_detail_value(details_map, ["transaction date", "transactiondate"]),
+        "posting_fee": _pick_detail_value(details_map, ["posting fee", "postingfee", "posting f"]),
+        "misc_fees": _pick_detail_value(details_map, ["misc fees", "miscfees"]),
+        "grand_total": _pick_detail_value(details_map, ["grand total", "grandtotal"]),
+        "sc_amount": _pick_detail_value(details_map, ["sc amount", "scamount"]),
+        "price_amount": _pick_detail_value(details_map, ["price amount", "priceamount", "price am"]),
+        "fee_amount": _pick_detail_value(details_map, ["fee amount", "feeamount", "fee am", "fee amo"]),
+        "sc_amount_foreign": _pick_detail_value(details_map, ["sc amount in foreign currency", "scamountinforeigncurrency", "scamour", "scamou"]),
+        "sett_amount": _pick_detail_value(details_map, ["sett amount", "settamount", "set amount"]),
+        "settlement_amount": _pick_detail_value(details_map, ["settlement amount", "settlementamount", "settlemer amount"]),
+        "settlement": _pick_detail_value(details_map, ["settlement"], allow_prefix_match=False),
+        "amount": _pick_detail_value(details_map, ["amount"]),
+        "difference": _pick_detail_value(details_map, ["difference"]),
+    }
 
 
 def _build_lookup_result_from_file(
@@ -532,7 +784,7 @@ def _build_lookup_result_from_file(
             cleaned = raw.replace("_", " ").strip()
             return " ".join(part.capitalize() for part in cleaned.split())
 
-        def _format_detail_value(label: str, value: str) -> str:
+        def _fmt_detail(label: str, value: str) -> str:
             if "date" in label.lower():
                 parsed = _parse_mmddyyyy_or_serial(value)
                 if parsed:
@@ -546,7 +798,7 @@ def _build_lookup_result_from_file(
             if "=" in part:
                 key, value = part.split("=", 1)
                 pretty_label = _pretty_label(key.strip())
-                pretty_value = _format_detail_value(pretty_label, value.strip())
+                pretty_value = _fmt_detail(pretty_label, value.strip())
                 rendered_rows.append(
                     f"<tr><th>{html.escape(pretty_label)}</th><td>{html.escape(pretty_value)}</td></tr>"
                 )
@@ -590,17 +842,19 @@ def _build_lookup_result_from_file(
             "amount": "Amount",
             "difference": "Difference",
         }
-        totals_rows = []
+        totals_rows_html = []
         for key, label in field_labels.items():
             parsed = _parse_amount_value(additional_fields.get(key, ""))
             if parsed is None:
                 continue
-            totals_rows.append(f"<tr><th>{html.escape(label)}</th><td>{parsed:,.2f}</td></tr>")
+            totals_rows_html.append(
+                f"<tr><th>{html.escape(label)}</th><td>{parsed:,.2f}</td></tr>"
+            )
 
-        if totals_rows:
+        if totals_rows_html:
             totals_block = (
                 "<h4>Totals Summary</h4>"
-                f"<table class=\"lookup-table\">{''.join(totals_rows)}</table>"
+                f"<table class=\"lookup-table\">{''.join(totals_rows_html)}</table>"
             )
 
     return (
@@ -618,25 +872,33 @@ def _build_lookup_result_from_file(
         f"{details_block}"
         "</section>"
     )
-def _build_lookup_result_from_cache(shipping_id: str, include_totals: bool = False) -> str:
+
+
+def _build_lookup_result_from_cache(
+    shipping_id: str, include_totals: bool = False
+) -> str:
     cached = _lookup_shipping_date(shipping_id)
     if not cached:
-        # Fallback for new Shipping IDs: search the most recent saved uploads.
         for candidate in _iter_saved_upload_files():
             record = lookup_shipping_date_record_by_id(str(candidate), shipping_id)
             if record:
-                return _build_lookup_result_from_file(candidate, shipping_id, candidate, include_totals)
+                return _build_lookup_result_from_file(
+                    candidate, shipping_id, candidate, include_totals
+                )
 
         return (
             "<section class=\"result error\">"
             "<h3>Shipping ID Lookup</h3>"
-            "<pre>No record found for this Shipping/Order ID in cached results or saved uploads. Upload a workbook to index this ID.</pre>"
+            "<pre>No record found for this Shipping/Order ID in cached results or saved uploads. "
+            "Upload a workbook to index this ID.</pre>"
             "</section>"
         )
 
     saved_path = cached.get("saved_file_path", "").strip()
     if saved_path and Path(saved_path).exists():
-        return _build_lookup_result_from_file(Path(saved_path), shipping_id, Path(saved_path), include_totals)
+        return _build_lookup_result_from_file(
+            Path(saved_path), shipping_id, Path(saved_path), include_totals
+        )
 
     found_date = cached.get("final_shipping_date", "N/A")
     source_path = cached.get("source_path", "cached")
@@ -656,130 +918,10 @@ def _build_lookup_result_from_cache(shipping_id: str, include_totals: bool = Fal
         "<h4>Lookup Details</h4>"
         "<table class=\"lookup-table\">"
         f"<tr><th>Last Updated</th><td>{html.escape(updated_at)}</td></tr>"
-        f"<tr><th>Lookup Mode</th><td>Cached record (no re-upload required)</td></tr>"
+        "<tr><th>Lookup Mode</th><td>Cached record (no re-upload required)</td></tr>"
         "</table>"
         "</section>"
     )
-
-
-def _parse_mmddyyyy_or_serial(value: str) -> str | None:
-    text = value.strip()
-    if not text:
-        return None
-
-    for fmt in ("%m-%d-%Y", "%Y-%m-%d", "%m/%d/%Y"):
-        try:
-            return datetime.strptime(text, fmt).strftime("%m-%d-%Y")
-        except ValueError:
-            continue
-
-    if re.fullmatch(r"\d+(\.\d+)?", text):
-        try:
-            serial = int(float(text))
-            if 30000 <= serial <= 90000:
-                converted = datetime(1899, 12, 30) + timedelta(days=serial)
-                return converted.strftime("%m-%d-%Y")
-        except (ValueError, OverflowError):
-            return None
-    return None
-
-
-def _period_bucket(date_text: str, group_by: str) -> str:
-    parsed = _parse_mmddyyyy_or_serial(date_text)
-    if not parsed:
-        return "Unknown"
-
-    dt = datetime.strptime(parsed, "%m-%d-%Y")
-    if group_by == "weekly":
-        iso_year, iso_week, _ = dt.isocalendar()
-        return f"{iso_year}-W{iso_week:02d}"
-    if group_by == "monthly":
-        return dt.strftime("%Y-%m")
-    if group_by == "quarterly":
-        quarter = ((dt.month - 1) // 3) + 1
-        return f"{dt.year}-Q{quarter}"
-    if group_by == "annual":
-        return dt.strftime("%Y")
-    return dt.strftime("%m-%d-%Y")
-
-
-def _parse_amount_value(value: str) -> float | None:
-    text = value.strip()
-    if not text:
-        return None
-    negative = False
-    if text.startswith("(") and text.endswith(")"):
-        negative = True
-        text = text[1:-1]
-    cleaned = text.replace(",", "").replace("$", "").strip()
-    if not re.fullmatch(r"[-+]?\d+(\.\d+)?", cleaned):
-        return None
-    number = float(cleaned)
-    return -number if negative else number
-
-
-def _normalize_field_key(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", value.strip().lower())
-
-
-def _parse_details_map(details: str) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for part in (p.strip() for p in details.split("|") if p.strip()):
-        if "=" not in part:
-            continue
-        key, value = part.split("=", 1)
-        normalized = _normalize_field_key(key)
-        if normalized and value.strip():
-            out[normalized] = value.strip()
-    return out
-
-
-def _pick_detail_value(details_map: dict[str, str], aliases: list[str], allow_prefix_match: bool = True) -> str:
-    normalized_aliases = [_normalize_field_key(alias) for alias in aliases]
-
-    for alias in normalized_aliases:
-        if alias in details_map:
-            return details_map[alias]
-
-    if allow_prefix_match:
-        for alias in normalized_aliases:
-            for key, value in details_map.items():
-                if key.startswith(alias):
-                    return value
-    return ""
-
-
-def _extract_additional_fields(details: str) -> dict[str, str]:
-    details_map = _parse_details_map(details)
-    return {
-        "settlement_id": _pick_detail_value(details_map, ["settlement id", "settlementid", "settlementid1"]),
-        "set_id": _pick_detail_value(details_map, ["set id", "setid"]),
-        "trans_type": _pick_detail_value(details_map, ["trans type", "transtype"]),
-        "movement_type": _pick_detail_value(details_map, ["movement type", "movementtype"]),
-        "order_id": _pick_detail_value(details_map, ["order id", "orderid"]),
-        "channel_order": _pick_detail_value(details_map, ["channel order", "channel order #", "channelorder", "channelorder#"]),
-        "sku": _pick_detail_value(details_map, ["sku"]),
-        "cogs": _pick_detail_value(details_map, ["cogs"]),
-        "commission": _pick_detail_value(details_map, ["commission"]),
-        "carrier": _pick_detail_value(details_map, ["carrier", "carriers"]),
-        "channel": _pick_detail_value(details_map, ["channel", "channels"], allow_prefix_match=False),
-        "shipping_cost": _pick_detail_value(details_map, ["shipping cost", "shippingcost"]),
-        "tax": _pick_detail_value(details_map, ["tax", "tax amount", "tax amt", "taxes", "sales tax"]),
-        "transaction_fee": _pick_detail_value(details_map, ["transaction fee", "transactionfee", "transaction fe", "transact"]),
-        "transaction_date": _pick_detail_value(details_map, ["transaction date", "transactiondate"]),
-        "posting_fee": _pick_detail_value(details_map, ["posting fee", "postingfee", "posting f"]),
-        "misc_fees": _pick_detail_value(details_map, ["misc fees", "miscfees"]),
-        "grand_total": _pick_detail_value(details_map, ["grand total", "grandtotal"]),
-        "sc_amount": _pick_detail_value(details_map, ["sc amount", "scamount"]),
-        "price_amount": _pick_detail_value(details_map, ["price amount", "priceamount", "price am"]),
-        "fee_amount": _pick_detail_value(details_map, ["fee amount", "feeamount", "fee am", "fee amo"]),
-        "sc_amount_foreign": _pick_detail_value(details_map, ["sc amount in foreign currency", "scamountinforeigncurrency", "scamour", "scamou"]),
-        "sett_amount": _pick_detail_value(details_map, ["sett amount", "settamount", "set amount"]),
-        "settlement_amount": _pick_detail_value(details_map, ["settlement amount", "settlementamount", "settlemer amount"]),
-        "settlement": _pick_detail_value(details_map, ["settlement"], allow_prefix_match=False),
-        "amount": _pick_detail_value(details_map, ["amount"]),
-        "difference": _pick_detail_value(details_map, ["difference"]),
-    }
 
 
 def _build_all_lookup_result_from_file(
@@ -793,7 +935,8 @@ def _build_all_lookup_result_from_file(
         return (
             "<section class=\"result error\">"
             "<h3>All Shipping IDs</h3>"
-            "<pre>No shipping IDs with valid shipping dates were found. Use an .xlsx workbook with Shipping/Order ID and date columns.</pre>"
+            "<pre>No shipping IDs with valid shipping dates were found. "
+            "Use an .xlsx workbook with Shipping/Order ID and date columns.</pre>"
             "</section>"
         )
 
@@ -883,7 +1026,11 @@ def _build_all_lookup_result_from_file(
             return ""
         header = "".join(f"<th>{html.escape(label)}</th>" for _, label in columns)
         body = "".join(
-            "<tr>" + "".join(f"<td>{html.escape(row.get(key, ''))}</td>" for key, _ in columns) + "</tr>"
+            "<tr>"
+            + "".join(
+                f"<td>{html.escape(row.get(key, ''))}</td>" for key, _ in columns
+            )
+            + "</tr>"
             for row in enriched_rows
         )
         return (
@@ -901,22 +1048,10 @@ def _build_all_lookup_result_from_file(
     totals_block = ""
     if include_totals and enriched_rows:
         summable_keys = {
-            "cogs",
-            "commission",
-            "shipping_cost",
-            "tax",
-            "transaction_fee",
-            "posting_fee",
-            "misc_fees",
-            "grand_total",
-            "sc_amount",
-            "price_amount",
-            "fee_amount",
-            "sc_amount_foreign",
-            "sett_amount",
-            "settlement_amount",
-            "amount",
-            "difference",
+            "cogs", "commission", "shipping_cost", "tax", "transaction_fee",
+            "posting_fee", "misc_fees", "grand_total", "sc_amount", "price_amount",
+            "fee_amount", "sc_amount_foreign", "sett_amount", "settlement_amount",
+            "amount", "difference",
         }
         sums: dict[str, float] = {}
         for key, _ in visible_extra:
@@ -934,15 +1069,14 @@ def _build_all_lookup_result_from_file(
                 sums[key] = total
 
         if sums:
-            totals_rows = "".join(
-                f"<tr><th>{html.escape(label)}</th><td>{amount:,.2f}</td></tr>"
+            totals_rows_html = "".join(
+                f"<tr><th>{html.escape(label)}</th><td>{sums[key]:,.2f}</td></tr>"
                 for key, label in visible_extra
-                for amount in [sums.get(key)]
-                if amount is not None
+                if key in sums
             )
             totals_block = (
                 "<h4>Totals Summary</h4>"
-                f"<table class=\"lookup-table\">{totals_rows}</table>"
+                f"<table class=\"lookup-table\">{totals_rows_html}</table>"
             )
 
     return (
@@ -965,11 +1099,15 @@ def _build_all_lookup_result_from_file(
     )
 
 
-def _format_result(invoices, validation, decision, enable_ai: bool, shipping_id: str = "") -> str:
+def _format_result(
+    invoices, validation, decision, enable_ai: bool, shipping_id: str = ""
+) -> str:
     text_output = to_text_output(invoices, validation, decision)
     json_output = to_json_output(invoices, validation, decision)
 
-    effective_shipping_id = shipping_id.strip() or (invoices[0].shipping_id or "").strip()
+    effective_shipping_id = (
+        shipping_id.strip() or (invoices[0].shipping_id or "").strip()
+    )
     if effective_shipping_id:
         _record_shipping_date(
             effective_shipping_id,
@@ -980,14 +1118,14 @@ def _format_result(invoices, validation, decision, enable_ai: bool, shipping_id:
     ai_block = ""
     if enable_ai:
         try:
-            insight = generate_bedrock_insight(invoices, validation, decision)
+            insight = generate_insight(invoices, validation, decision)
             ai_block = (
-                "<h3>AI Assist (AWS Bedrock)</h3>"
+                "<h3>AI Assist</h3>"
                 f"<pre>{html.escape(insight)}</pre>"
             )
         except Exception as exc:  # noqa: BLE001
             ai_block = (
-                "<h3>AI Assist (AWS Bedrock)</h3>"
+                "<h3>AI Assist</h3>"
                 f"<pre>AI assist unavailable: {html.escape(str(exc))}</pre>"
             )
 
@@ -1009,7 +1147,9 @@ def _format_result(invoices, validation, decision, enable_ai: bool, shipping_id:
     )
 
 
-def _build_result_from_path(invoice_path: Path, enable_ai: bool = False, shipping_id: str = "") -> str:
+def _build_result_from_path(
+    invoice_path: Path, enable_ai: bool = False, shipping_id: str = ""
+) -> str:
     try:
         invoices, validation, decision = determine_shipping_date_single(str(invoice_path))
         return _format_result(invoices, validation, decision, enable_ai, shipping_id)
@@ -1022,21 +1162,24 @@ def _build_result_from_path(invoice_path: Path, enable_ai: bool = False, shippin
         )
 
 
-def _write_uploaded_file(file_field: cgi.FieldStorage, prefix: str) -> Path:
+def _write_uploaded_file(file_field: _FormFile, prefix: str) -> Path:
+    """Write the bytes from a parsed multipart file field to a temp file."""
     original_name = file_field.filename or "uploaded.txt"
     suffix = Path(original_name).suffix or ".txt"
-    data = file_field.file.read() if file_field.file else b""
 
     temp = tempfile.NamedTemporaryFile("wb", suffix=suffix, prefix=prefix, delete=False)
     try:
-        temp.write(data)
+        temp.write(file_field.data)
         temp.flush()
     finally:
         temp.close()
     return Path(temp.name)
 
 
+# ── Request handler ───────────────────────────────────────────────────────────
+
 class ShipDateWebHandler(BaseHTTPRequestHandler):
+
     def _send_html(self, payload: bytes, status: int = 200) -> None:
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1044,95 +1187,168 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _send_json(self, payload: dict, status: int = 200) -> None:
+        data = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_csv_export(self) -> None:
+        """Stream the full lookup history as a UTF-8 CSV download."""
+        records = _load_records()
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["Shipping ID", "Shipping Date", "Source", "Last Updated"])
+        for sid, payload in sorted(
+            records.items(),
+            key=lambda x: x[1].get("updated_at", ""),
+            reverse=True,
+        ):
+            writer.writerow([
+                sid,
+                payload.get("final_shipping_date", ""),
+                payload.get("source_path", ""),
+                payload.get("updated_at", ""),
+            ])
+
+        # UTF-8 BOM so Excel opens it without a converter dialog.
+        csv_bytes = "\ufeff".encode("utf-8") + buf.getvalue().encode("utf-8")
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header(
+            "Content-Disposition",
+            'attachment; filename="shipping_lookups.csv"',
+        )
+        self.send_header("Content-Length", str(len(csv_bytes)))
+        self.end_headers()
+        self.wfile.write(csv_bytes)
+
+    def log_message(self, fmt: str, *args) -> None:  # noqa: ANN001
+        # Suppress the default stderr access log — use Python logging instead.
+        pass
+
     def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/health":
+            self._send_json({"status": "ok"})
+            return
+        if self.path == "/export.csv":
+            self._send_csv_export()
+            return
         if self.path != "/":
-            self._send_html(_render("", "", True, "single", "daily", False), status=404)
+            self._send_html(
+                _render("", "", True, "single", "daily", False), status=404
+            )
             return
         self._send_html(_render("", "", True, "single", "daily", False))
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path != "/":
-            self._send_html(_render("", "", True, "single", "daily", False), status=404)
+            self._send_html(
+                _render("", "", True, "single", "daily", False), status=404
+            )
             return
 
         content_type = self.headers.get("Content-Type", "")
-        enable_ai = True
 
-        if "multipart/form-data" in content_type:
-            form = cgi.FieldStorage(
-                fp=self.rfile,
-                headers=self.headers,
-                environ={
-                    "REQUEST_METHOD": "POST",
-                    "CONTENT_TYPE": content_type,
-                },
+        if "multipart/form-data" not in content_type:
+            error = (
+                "<section class=\"result error\">"
+                "<h3>Error</h3>"
+                "<pre>Unsupported request format. Please submit using the upload form.</pre>"
+                "</section>"
             )
+            self._send_html(_render("", error, True, "single", "daily", False), status=400)
+            return
 
-            invoice_file = form["invoice_file"] if "invoice_file" in form else None
-            enable_ai = form.getfirst("enable_ai", "") == "on"
-            include_totals = form.getfirst("include_totals", "") == "on"
-            shipping_id = form.getfirst("shipping_id", "")
-            lookup_mode = form.getfirst("lookup_mode", "single").strip().lower()
-            if lookup_mode not in {"single", "all"}:
-                lookup_mode = "single"
-            group_by = form.getfirst("group_by", "daily").strip().lower()
-            if group_by not in {"daily", "weekly", "monthly", "quarterly", "annual"}:
-                group_by = "daily"
+        content_length = int(self.headers.get("Content-Length", -1))
+        form = _parse_multipart(self.rfile, content_type, content_length)
 
-            file_path = None
+        invoice_file = form.get("invoice_file")
+        if not isinstance(invoice_file, _FormFile):
+            invoice_file = None
 
-            try:
-                if invoice_file is not None and getattr(invoice_file, "filename", None):
-                    file_path = _write_uploaded_file(invoice_file, "invoice_")
+        enable_ai = _form_str(form, "enable_ai") == "on"
+        include_totals = _form_str(form, "include_totals") == "on"
+        shipping_id = _form_str(form, "shipping_id")
 
-                if file_path is not None:
-                    if lookup_mode == "all":
-                        saved_path = _persist_uploaded_file(file_path, shipping_id or "all")
-                        result = _build_all_lookup_result_from_file(file_path, group_by, saved_path, include_totals)
-                        self._send_html(_render(shipping_id, result, enable_ai, lookup_mode, group_by, include_totals))
-                        return
+        lookup_mode = _form_str(form, "lookup_mode", "single").strip().lower()
+        if lookup_mode not in {"single", "all"}:
+            lookup_mode = "single"
 
-                    if shipping_id.strip():
-                        saved_path = _persist_uploaded_file(file_path, shipping_id)
-                        _record_saved_file(shipping_id, str(saved_path))
-                        result = _build_lookup_result_from_file(file_path, shipping_id, saved_path, include_totals)
-                        self._send_html(_render(shipping_id, result, enable_ai, lookup_mode, group_by, include_totals))
-                        return
+        group_by = _form_str(form, "group_by", "daily").strip().lower()
+        if group_by not in {"daily", "weekly", "monthly", "quarterly", "annual"}:
+            group_by = "daily"
 
-                    result = _build_result_from_path(file_path, enable_ai, shipping_id)
-                    self._send_html(_render(shipping_id, result, enable_ai, lookup_mode, group_by, include_totals))
+        file_path: Path | None = None
+
+        try:
+            if invoice_file is not None and invoice_file.filename:
+                file_path = _write_uploaded_file(invoice_file, "invoice_")
+
+            if file_path is not None:
+                if lookup_mode == "all":
+                    saved_path = _persist_uploaded_file(file_path, shipping_id or "all")
+                    result = _build_all_lookup_result_from_file(
+                        file_path, group_by, saved_path, include_totals
+                    )
+                    self._send_html(
+                        _render(shipping_id, result, enable_ai, lookup_mode, group_by, include_totals)
+                    )
                     return
 
                 if shipping_id.strip():
-                    result = _build_lookup_result_from_cache(shipping_id, include_totals)
-                    self._send_html(_render(shipping_id, result, enable_ai, lookup_mode, group_by, include_totals))
+                    saved_path = _persist_uploaded_file(file_path, shipping_id)
+                    _record_saved_file(shipping_id, str(saved_path))
+                    result = _build_lookup_result_from_file(
+                        file_path, shipping_id, saved_path, include_totals
+                    )
+                    self._send_html(
+                        _render(shipping_id, result, enable_ai, lookup_mode, group_by, include_totals)
+                    )
                     return
 
-                error = (
-                    "<section class=\"result error\">"
-                    "<h3>Error</h3>"
-                    "<pre>Please upload one file to process, or include a Shipping/Order ID for cached lookup. For All Shipping IDs mode, upload an .xlsx file.</pre>"
-                    "</section>"
+                result = _build_result_from_path(file_path, enable_ai, shipping_id)
+                self._send_html(
+                    _render(shipping_id, result, enable_ai, lookup_mode, group_by, include_totals)
                 )
-                self._send_html(_render(shipping_id, error, enable_ai, lookup_mode, group_by, include_totals), status=400)
                 return
-            finally:
-                if file_path is not None:
-                    file_path.unlink(missing_ok=True)
 
-        error = (
-            "<section class=\"result error\">"
-            "<h3>Error</h3>"
-            "<pre>Unsupported request format. Please submit using the upload form.</pre>"
-            "</section>"
-        )
-        self._send_html(_render("", error, True, "single", "daily", False), status=400)
+            if shipping_id.strip():
+                result = _build_lookup_result_from_cache(shipping_id, include_totals)
+                self._send_html(
+                    _render(shipping_id, result, enable_ai, lookup_mode, group_by, include_totals)
+                )
+                return
 
+            error = (
+                "<section class=\"result error\">"
+                "<h3>Error</h3>"
+                "<pre>Please upload one file to process, or include a Shipping/Order ID for cached lookup. "
+                "For All Shipping IDs mode, upload an .xlsx file.</pre>"
+                "</section>"
+            )
+            self._send_html(
+                _render(shipping_id, error, enable_ai, lookup_mode, group_by, include_totals),
+                status=400,
+            )
+        finally:
+            if file_path is not None:
+                file_path.unlink(missing_ok=True)
+
+
+# ── CLI entry point ───────────────────────────────────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a local web UI for Ship Date Engine")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000)")
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8000, help="Port to bind (default: 8000)"
+    )
     return parser
 
 
