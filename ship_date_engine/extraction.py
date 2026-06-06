@@ -35,8 +35,49 @@ _KEY_ALIASES = {
     "priority": "priority",
 }
 
-_DATE_FORMATS = ["%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%d-%b-%Y"]
+_DATE_FORMATS = [
+    "%Y-%m-%d",
+    "%m/%d/%Y",
+    "%m-%d-%Y",
+    "%d-%b-%Y",
+    "%B %d, %Y",   # e.g. "May 10, 2026"
+    "%b %d, %Y",   # e.g. "May 10, 2026" (abbreviated)
+    "%d %B %Y",    # e.g. "10 May 2026"
+    "%d/%m/%Y",    # European day-first
+    "%Y/%m/%d",
+]
 
+# ── Module-level header name sets ─────────────────────────────────────────────
+# Kept as frozensets so they're immutable and cheap to test membership against.
+
+_SHIPPING_HEADERS: frozenset[str] = frozenset(
+    {
+        "shipping id",
+        "shipment id",
+        "ship id",
+        "order number",
+        "order #",
+        "order no",
+        "order #/id",
+        "order id",
+        "sales order",
+    }
+)
+
+_DATE_HEADERS: frozenset[str] = frozenset(
+    {
+        "shipping date",
+        "ship date",
+        "ship by date",
+        "final shipping date",
+        "actual ship date",
+        "promised ship date",
+        "delivery date",
+    }
+)
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _normalize_lookup_id(value: str) -> str:
     text = value.strip().lower()
@@ -79,7 +120,7 @@ def _parse_date_flexible(value: str) -> date | None:
         try:
             serial = int(float(text))
             # Guard against treating large numeric IDs (e.g. order numbers) as dates.
-            # Excel serial dates for modern business ranges are typically below this bound.
+            # Excel serial dates for modern business ranges are typically below 90 000.
             if 30000 <= serial <= 90000:
                 converted = date(1899, 12, 30) + timedelta(days=serial)
                 if converted.year < 2000 or converted.year > 2100:
@@ -129,6 +170,65 @@ def _format_detail_value(key: str, value: str) -> str:
     return text
 
 
+# ── Header-column discovery ───────────────────────────────────────────────────
+
+def _find_shipping_columns(
+    rows: list[list[str]],
+    max_scan: int = 50,
+) -> tuple[int, int, int, list[str]]:
+    """Scan the first *max_scan* rows to locate the header row.
+
+    Returns ``(header_idx, shipping_col, date_col, header_row)``.
+
+    Strategy
+    --------
+    * A row that contains **both** a shipping-ID column and a date column is
+      returned immediately — it's the best possible header.
+    * If we find a row with *only* a shipping-ID column we remember it and keep
+      looking; a later row might have both.
+    * Returns ``(-1, -1, -1, [])`` when nothing useful is found.
+    """
+    best_idx = -1
+    best_shipping_col = -1
+    best_date_col = -1
+    best_row: list[str] = []
+
+    for idx, row in enumerate(rows[:max_scan]):
+        normalized = [_normalize_key(cell) for cell in row]
+
+        local_shipping_col = next(
+            (
+                col
+                for col, cell in enumerate(normalized)
+                if any(h in cell for h in _SHIPPING_HEADERS)
+            ),
+            -1,
+        )
+        local_date_col = next(
+            (
+                col
+                for col, cell in enumerate(normalized)
+                if any(h in cell for h in _DATE_HEADERS)
+            ),
+            -1,
+        )
+
+        # Perfect match — both columns present in this row.
+        if local_shipping_col >= 0 and local_date_col >= 0:
+            return idx, local_shipping_col, local_date_col, row
+
+        # Partial match — remember it but keep scanning.
+        if local_shipping_col >= 0 and best_idx < 0:
+            best_idx = idx
+            best_shipping_col = local_shipping_col
+            best_date_col = local_date_col
+            best_row = row
+
+    return best_idx, best_shipping_col, best_date_col, best_row
+
+
+# ── XLSX / XLS readers ────────────────────────────────────────────────────────
+
 def _read_xml_text(path: Path) -> str:
     root = ET.fromstring(path.read_text(encoding="utf-8", errors="ignore"))
     lines: list[str] = []
@@ -156,7 +256,11 @@ def _read_xlsx_text(path: Path) -> str:
                 if node.tag.endswith("}t") and node.text is not None:
                     shared_strings.append(node.text)
 
-        sheet_files = sorted(name for name in workbook.namelist() if name.startswith("xl/worksheets/sheet") and name.endswith(".xml"))
+        sheet_files = sorted(
+            name
+            for name in workbook.namelist()
+            if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
+        )
 
         for sheet_name in sheet_files:
             sheet_xml = ET.fromstring(workbook.read(sheet_name))
@@ -182,7 +286,14 @@ def _read_xlsx_text(path: Path) -> str:
                             value_node = child
                             break
                         if child.tag.endswith("}is"):
-                            text_node = next((n for n in child.iter() if n.tag.endswith("}t") and n.text is not None), None)
+                            text_node = next(
+                                (
+                                    n
+                                    for n in child.iter()
+                                    if n.tag.endswith("}t") and n.text is not None
+                                ),
+                                None,
+                            )
                             if text_node is not None:
                                 row_map[col_idx] = text_node.text.strip()
                             value_node = None
@@ -234,7 +345,9 @@ def _read_xlsx_rows(path: Path) -> list[tuple[str, list[list[str]]]]:
             wb_xml = ET.fromstring(workbook.read("xl/workbook.xml"))
             for node in wb_xml.iter():
                 if node.tag.endswith("}sheet"):
-                    rid = node.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+                    rid = node.attrib.get(
+                        "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+                    )
                     title = node.attrib.get("name", "Sheet")
                     if rid:
                         sheet_titles[rid] = title
@@ -260,7 +373,9 @@ def _read_xlsx_rows(path: Path) -> list[tuple[str, list[list[str]]]]:
 
         if not ordered_targets:
             fallback = sorted(
-                name for name in names if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
+                name
+                for name in names
+                if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
             )
             ordered_targets = [(Path(name).stem, name) for name in fallback]
 
@@ -288,14 +403,30 @@ def _read_xlsx_rows(path: Path) -> list[tuple[str, list[list[str]]]]:
                     cell_type = cell.attrib.get("t")
                     value = ""
 
-                    inline_node = next((n for n in cell.iter() if n.tag.endswith("}is")), None)
+                    inline_node = next(
+                        (n for n in cell.iter() if n.tag.endswith("}is")), None
+                    )
                     if inline_node is not None:
-                        text_node = next((n for n in inline_node.iter() if n.tag.endswith("}t") and n.text is not None), None)
+                        text_node = next(
+                            (
+                                n
+                                for n in inline_node.iter()
+                                if n.tag.endswith("}t") and n.text is not None
+                            ),
+                            None,
+                        )
                         if text_node is not None:
                             value = text_node.text.strip()
 
                     if not value:
-                        value_node = next((n for n in cell.iter() if n.tag.endswith("}v") and n.text is not None), None)
+                        value_node = next(
+                            (
+                                n
+                                for n in cell.iter()
+                                if n.tag.endswith("}v") and n.text is not None
+                            ),
+                            None,
+                        )
                         if value_node is not None:
                             value = value_node.text.strip()
 
@@ -328,7 +459,9 @@ def _read_xls_text(path: Path) -> str:
     try:
         import xlrd  # type: ignore
     except ImportError as exc:
-        raise ValueError("Legacy .xls support requires 'xlrd' package. Prefer .xlsx when possible.") from exc
+        raise ValueError(
+            "Legacy .xls support requires 'xlrd' package. Prefer .xlsx when possible."
+        ) from exc
 
     workbook = xlrd.open_workbook(str(path))
     lines: list[str] = []
@@ -344,7 +477,11 @@ def _read_xls_text(path: Path) -> str:
     return "\n".join(lines)
 
 
-def lookup_shipping_date_record_by_id(file_path: str, shipping_id: str) -> dict[str, str] | None:
+# ── XLSX record lookup ────────────────────────────────────────────────────────
+
+def lookup_shipping_date_record_by_id(
+    file_path: str, shipping_id: str
+) -> dict[str, str] | None:
     path = Path(file_path)
     shipping_id_key = _normalize_lookup_id(shipping_id)
     if not shipping_id_key:
@@ -354,60 +491,14 @@ def lookup_shipping_date_record_by_id(file_path: str, shipping_id: str) -> dict[
 
     if suffix == ".xlsx":
         sheets = _read_xlsx_rows(path)
-        shipping_headers = {
-            "shipping id",
-            "shipment id",
-            "ship id",
-            "order number",
-            "order #",
-            "order no",
-            "order #/id",
-            "order id",
-            "sales order",
-        }
-        date_headers = {
-            "shipping date",
-            "ship date",
-            "ship by date",
-            "final shipping date",
-            "actual ship date",
-            "promised ship date",
-            "delivery date",
-        }
         matches: list[dict[str, str]] = []
 
         for sheet_name, rows in sheets:
             if not rows:
                 continue
 
-            header_idx = -1
-            shipping_col = -1
-            date_col = -1
-            header_row: list[str] = []
-
-            for idx, row in enumerate(rows[:50]):
-                normalized = [_normalize_key(cell) for cell in row]
-                local_shipping_col = -1
-                local_date_col = -1
-
-                for col, cell in enumerate(normalized):
-                    if local_shipping_col < 0 and any(h in cell for h in shipping_headers):
-                        local_shipping_col = col
-                    if local_date_col < 0 and any(h in cell for h in date_headers):
-                        local_date_col = col
-
-                if local_shipping_col >= 0 and local_date_col >= 0:
-                    header_idx = idx
-                    shipping_col = local_shipping_col
-                    date_col = local_date_col
-                    header_row = row
-                    break
-
-                if local_shipping_col >= 0 and header_idx < 0:
-                    header_idx = idx
-                    shipping_col = local_shipping_col
-                    date_col = local_date_col
-                    header_row = row
+            # Use shared helper — removes ~25 lines of duplicated scanning.
+            header_idx, shipping_col, date_col, header_row = _find_shipping_columns(rows)
 
             if header_idx >= 0 and shipping_col >= 0:
                 for row in rows[header_idx + 1 :]:
@@ -426,7 +517,9 @@ def lookup_shipping_date_record_by_id(file_path: str, shipping_id: str) -> dict[
                     if not shipping_date:
                         row_dates = [
                             parsed.strftime("%m-%d-%Y")
-                            for parsed in (_parse_date_flexible(cell) for cell in row)
+                            for parsed in (
+                                _parse_date_flexible(cell) for cell in row
+                            )
                             if parsed
                         ]
                         if row_dates:
@@ -442,7 +535,9 @@ def lookup_shipping_date_record_by_id(file_path: str, shipping_id: str) -> dict[
                             continue
                         header = header_row[col_idx] if col_idx < len(header_row) else ""
                         key = _header_key(header, col_idx)
-                        detail_pairs.append(f"{key}={_format_detail_value(key, value_text)}")
+                        detail_pairs.append(
+                            f"{key}={_format_detail_value(key, value_text)}"
+                        )
                     details = " | ".join(detail_pairs)
 
                     matches.append(
@@ -490,11 +585,15 @@ def lookup_shipping_date_record_by_id(file_path: str, shipping_id: str) -> dict[
         if not matches:
             return None
 
-        explicit_ambiguous = next((m for m in matches if m.get("status") == "ambiguous"), None)
+        explicit_ambiguous = next(
+            (m for m in matches if m.get("status") == "ambiguous"), None
+        )
         if explicit_ambiguous is not None:
             return explicit_ambiguous
 
-        distinct_dates = sorted({m.get("shipping_date", "") for m in matches if m.get("shipping_date")})
+        distinct_dates = sorted(
+            {m.get("shipping_date", "") for m in matches if m.get("shipping_date")}
+        )
         if len(distinct_dates) > 1:
             return {
                 "status": "ambiguous",
@@ -510,31 +609,21 @@ def lookup_shipping_date_record_by_id(file_path: str, shipping_id: str) -> dict[
     invoice = extract_invoice_data(str(path))
     current_id = _normalize_lookup_id(invoice.shipping_id or "")
     if current_id and current_id == shipping_id_key:
-        if invoice.ship_by_date:
-            return {
-                "status": "ok",
-                "shipping_id": shipping_id,
-                "shipping_date": invoice.ship_by_date.strftime("%m-%d-%Y"),
-                "sheet": "invoice",
-            }
-        if invoice.latest_ship_date:
-            return {
-                "status": "ok",
-                "shipping_id": shipping_id,
-                "shipping_date": invoice.latest_ship_date.strftime("%m-%d-%Y"),
-                "sheet": "invoice",
-            }
-        if invoice.earliest_ship_date:
-            return {
-                "status": "ok",
-                "shipping_id": shipping_id,
-                "shipping_date": invoice.earliest_ship_date.strftime("%m-%d-%Y"),
-                "sheet": "invoice",
-            }
+        for field in ("ship_by_date", "latest_ship_date", "earliest_ship_date"):
+            value = getattr(invoice, field, None)
+            if value:
+                return {
+                    "status": "ok",
+                    "shipping_id": shipping_id,
+                    "shipping_date": value.strftime("%m-%d-%Y"),
+                    "sheet": "invoice",
+                }
     return None
 
 
-def research_order_id_in_workbook(file_path: str, order_id: str) -> dict[str, str]:
+def research_order_id_in_workbook(
+    file_path: str, order_id: str
+) -> dict[str, str]:
     path = Path(file_path)
     order_id_key = _normalize_lookup_id(order_id)
     if not order_id_key:
@@ -569,7 +658,9 @@ def research_order_id_in_workbook(file_path: str, order_id: str) -> dict[str, st
                     row_dates.append(parsed.strftime("%m-%d-%Y"))
 
             preview = " | ".join(cell.strip() for cell in row if cell.strip())
-            date_part = f" | dates={', '.join(sorted(set(row_dates)))}" if row_dates else ""
+            date_part = (
+                f" | dates={', '.join(sorted(set(row_dates)))}" if row_dates else ""
+            )
             hit_lines.append(f"{sheet_name}#R{row_idx}: {preview}{date_part}")
 
     if not hit_lines:
@@ -599,27 +690,6 @@ def list_shipping_date_records(file_path: str) -> list[dict[str, str]]:
     if path.suffix.lower() != ".xlsx":
         return []
 
-    shipping_headers = {
-        "shipping id",
-        "shipment id",
-        "ship id",
-        "order number",
-        "order #",
-        "order no",
-        "order #/id",
-        "order id",
-        "sales order",
-    }
-    date_headers = {
-        "shipping date",
-        "ship date",
-        "ship by date",
-        "final shipping date",
-        "actual ship date",
-        "promised ship date",
-        "delivery date",
-    }
-
     records: list[dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
 
@@ -627,34 +697,8 @@ def list_shipping_date_records(file_path: str) -> list[dict[str, str]]:
         if not rows:
             continue
 
-        header_idx = -1
-        shipping_col = -1
-        date_col = -1
-        header_row: list[str] = []
-
-        for idx, row in enumerate(rows[:50]):
-            normalized = [_normalize_key(cell) for cell in row]
-            local_shipping_col = -1
-            local_date_col = -1
-
-            for col, cell in enumerate(normalized):
-                if local_shipping_col < 0 and any(h in cell for h in shipping_headers):
-                    local_shipping_col = col
-                if local_date_col < 0 and any(h in cell for h in date_headers):
-                    local_date_col = col
-
-            if local_shipping_col >= 0 and local_date_col >= 0:
-                header_idx = idx
-                shipping_col = local_shipping_col
-                date_col = local_date_col
-                header_row = row
-                break
-
-            if local_shipping_col >= 0 and header_idx < 0:
-                header_idx = idx
-                shipping_col = local_shipping_col
-                date_col = local_date_col
-                header_row = row
+        # Use shared helper — removes ~25 lines of duplicated scanning.
+        header_idx, shipping_col, date_col, header_row = _find_shipping_columns(rows)
 
         if header_idx < 0 or shipping_col < 0:
             continue
@@ -675,7 +719,14 @@ def list_shipping_date_records(file_path: str) -> list[dict[str, str]]:
                     shipping_date = parsed.strftime("%m-%d-%Y")
 
             if not shipping_date:
-                first_date = next((d for d in (_parse_date_flexible(cell) for cell in row) if d), None)
+                first_date = next(
+                    (
+                        d
+                        for d in (_parse_date_flexible(cell) for cell in row)
+                        if d
+                    ),
+                    None,
+                )
                 if first_date:
                     shipping_date = first_date.strftime("%m-%d-%Y")
 
@@ -694,7 +745,9 @@ def list_shipping_date_records(file_path: str) -> list[dict[str, str]]:
                     continue
                 header = header_row[col_idx] if col_idx < len(header_row) else ""
                 key = _header_key(header, col_idx)
-                detail_pairs.append(f"{key}={_format_detail_value(key, value_text)}")
+                detail_pairs.append(
+                    f"{key}={_format_detail_value(key, value_text)}"
+                )
 
             records.append(
                 {
@@ -705,9 +758,13 @@ def list_shipping_date_records(file_path: str) -> list[dict[str, str]]:
                 }
             )
 
-    records.sort(key=lambda item: (item.get("shipping_date", ""), item.get("shipping_id", "")))
+    records.sort(
+        key=lambda item: (item.get("shipping_date", ""), item.get("shipping_id", ""))
+    )
     return records
 
+
+# ── Text reader dispatcher ────────────────────────────────────────────────────
 
 def _read_text(path: Path) -> str:
     suffix = path.suffix.lower()
@@ -727,7 +784,7 @@ def _read_text(path: Path) -> str:
         try:
             from pypdf import PdfReader  # type: ignore
         except ImportError as exc:
-            raise ValueError("PDF support requires 'pypdf' package") from exc
+            raise ValueError("PDF support requires 'pypdf' package: pip install pypdf") from exc
 
         reader = PdfReader(str(path))
         return "\n".join((page.extract_text() or "") for page in reader.pages)
@@ -737,11 +794,16 @@ def _read_text(path: Path) -> str:
             import pytesseract  # type: ignore
             from PIL import Image  # type: ignore
         except ImportError as exc:
-            raise ValueError("Image OCR support requires 'pytesseract' and 'Pillow'") from exc
+            raise ValueError(
+                "Image OCR support requires 'pytesseract' and 'Pillow': "
+                "pip install pytesseract Pillow"
+            ) from exc
         return pytesseract.image_to_string(Image.open(path))
 
     return path.read_text(encoding="utf-8", errors="ignore")
 
+
+# ── Public entry point ────────────────────────────────────────────────────────
 
 def extract_invoice_data(file_path: str) -> InvoiceData:
     path = Path(file_path)
@@ -771,12 +833,22 @@ def extract_invoice_data(file_path: str) -> InvoiceData:
         if not field_name:
             continue
 
-        if field_name in {"invoice_date", "earliest_ship_date", "latest_ship_date", "ship_by_date"}:
+        if field_name in {
+            "invoice_date",
+            "earliest_ship_date",
+            "latest_ship_date",
+            "ship_by_date",
+        }:
             parsed = _parse_date(value)
             if parsed:
                 setattr(invoice, field_name, parsed)
             else:
-                LOGGER.warning("Unrecognized date format for %s in %s: %s", field_name, file_path, value)
+                LOGGER.warning(
+                    "Unrecognized date format for %s in %s: %s",
+                    field_name,
+                    file_path,
+                    value,
+                )
         elif field_name == "priority":
             try:
                 invoice.priority = int(value)
