@@ -1,19 +1,21 @@
-from __future__ import annotations
+"""Output formatting for Ship Date Engine."""
 
 import json
 from datetime import date
+from typing import Any, Optional
 
-from .models import InvoiceData, ShippingDecision, ValidationResult
 
-
-def _fmt(d: date) -> str:
+def _fmt(d: Optional[date]) -> str:
+    """Format a date, handling None values."""
+    if d is None:
+        return "N/A"
     return d.strftime("%m-%d-%Y")
 
 
 def to_json_output(
-    invoices: list[InvoiceData],
-    validation: ValidationResult,
-    decision: ShippingDecision,
+    invoices: list[Any],
+    validation: Any,
+    decision: Any,
 ) -> str:
     payload = {
         "invoices": [i.to_dict() for i in invoices],
@@ -27,9 +29,9 @@ def to_json_output(
 
 
 def to_text_output(
-    invoices: list[InvoiceData],
-    validation: ValidationResult,
-    decision: ShippingDecision,
+    invoices: list[Any],
+    validation: Any,
+    decision: Any,
 ) -> str:
     lines = [
         "Shipping Date Engine Result",
