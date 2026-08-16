@@ -1,7 +1,7 @@
 """Database module for Ship Date Engine API."""
 import sqlite3
 import json
-from typing import Any
+from typing import Any, Dict, Optional
 
 
 def get_connection():
@@ -32,7 +32,7 @@ def init_db():
     conn.close()
 
 
-def save_upload(filename: str, filepath: str, metadata: dict[str, Any] | None = None) -> bool:
+def save_upload(filename: str, filepath: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
     try:
         conn = get_connection()
         c = conn.cursor()
