@@ -5,6 +5,7 @@ import json
 
 from .db import save_upload, get_cached_lookup, cleanup_old_lookups
 from .config import Config
+from .security import ValidationError, sanitize_filename
 
 app = FastAPI(title="Ship Date Engine API", version="1.0.0")
 
@@ -18,9 +19,13 @@ async def health_check():
 @app.post("/upload/{shipping_id}")
 async def upload_invoice(shipping_id: str, invoice: UploadFile = File(...), priority: int = Form(default=100)):
     """Upload an invoice with shipping ID."""
-    filename = invoice.filename
-    if not filename:
+    raw_filename = invoice.filename
+    if not raw_filename:
         raise HTTPException(status_code=400, detail="Filename is required")
+    try:
+        filename = sanitize_filename(raw_filename)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
 
     ext = Path(filename).suffix.lower()
     if ext not in Config.ALLOWED_EXTENSIONS:

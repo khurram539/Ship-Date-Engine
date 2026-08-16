@@ -63,7 +63,7 @@ def get_cached_lookup(shipping_id):
                 results[row[0]] = row[1]
             conn.close()
             return results
-    except:
+    except Exception:
         return None
 
 
@@ -75,7 +75,7 @@ def save_lookup(shipping_id, result):
         conn.commit()
         conn.close()
         return True
-    except:
+    except Exception:
         return False
 
 
