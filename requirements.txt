@@ -1,0 +1,24 @@
+# Ship Date Engine - Backend API Requirements
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+
+# Data processing
+openpyxl>=3.1.0
+pandas>=2.0.0
+
+# Optional: Image/Document parsing
+pdfminer-six>=2023.12.14  # For PDF text extraction
+python-magic>=0.4.27      # For file type detection
+
+# Optional: AI/Bedrock integration
+boto3>=1.34.0              # For AWS Bedrock AI assist
+
+# Database (SQLite default)
+# No additional dependencies needed for SQLite
+
+# Development and testing
+pytest>=7.4.0
+black>=24.0.0
+flake8>=6.1.0
+httpx>=0.26.0  # For API testing
