@@ -11,6 +11,9 @@ env:
   PYTHON_VERSION: '3.11'
   PYRIGHT_VERSION: '1.1.357'
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -48,7 +51,7 @@ jobs:
       
       - name: Install pyright
         run: |
-          pip install pyright
+          pip install "pyright==${PYRIGHT_VERSION}" fastapi pydantic
       
       - name: Run pyright type checking
         run: |
@@ -105,4 +108,4 @@ jobs:
       
       - name: Run integration tests
         run: |
-          pytest tests/ -m integration -v --tb=short
+          PYTHONPATH=$PYTHONPATH:$(pwd) pytest tests/ -m integration -v --tb=short

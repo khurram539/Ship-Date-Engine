@@ -1,9 +1,15 @@
 # Ship Date Engine GitHub Actions Workflow for Release
-ame: Release Build
+name: Release Build
 
 on:
   release:
     types: [published]
+
+env:
+  PYTHON_VERSION: '3.11'
+
+permissions:
+  contents: read
 
 jobs:
   build:

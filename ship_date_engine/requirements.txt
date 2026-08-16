@@ -1,0 +1,18 @@
+# Ship Date Engine — Python 3.10+
+# Install the core package first, then add optional extras as needed.
+
+# ── Optional: AWS Bedrock AI assist ──────────────────────────────────────────
+boto3>=1.28.0
+
+# ── Optional: Direct Anthropic API AI assist ─────────────────────────────────
+anthropic>=0.25.0
+
+# ── Optional: PDF text extraction ────────────────────────────────────────────
+pypdf>=4.0.0
+
+# ── Optional: Image OCR (PNG / JPG / TIF / BMP) ──────────────────────────────
+pytesseract>=0.3.10
+Pillow>=10.0.0
+
+# ── Optional: Legacy .xls workbook support ───────────────────────────────────
+xlrd>=2.0.1

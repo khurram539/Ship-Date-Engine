@@ -2,7 +2,9 @@
 
 import json
 from datetime import date
-from typing import Any, Optional
+from typing import Optional
+
+from .models import InvoiceData, ShippingDecision, ValidationResult
 
 
 def _fmt(d: Optional[date]) -> str:
@@ -13,9 +15,9 @@ def _fmt(d: Optional[date]) -> str:
 
 
 def to_json_output(
-    invoices: list[Any],
-    validation: Any,
-    decision: Any,
+    invoices: list[InvoiceData],
+    validation: ValidationResult,
+    decision: ShippingDecision,
 ) -> str:
     payload = {
         "invoices": [i.to_dict() for i in invoices],
@@ -29,9 +31,9 @@ def to_json_output(
 
 
 def to_text_output(
-    invoices: list[Any],
-    validation: Any,
-    decision: Any,
+    invoices: list[InvoiceData],
+    validation: ValidationResult,
+    decision: ShippingDecision,
 ) -> str:
     lines = [
         "Shipping Date Engine Result",

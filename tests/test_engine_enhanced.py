@@ -10,6 +10,7 @@ from ship_date_engine.output import to_json_output, to_text_output
 from tests.conftest import TestUtilities, SampleInvoiceData
 
 
+@pytest.mark.integration
 class TestShippingDateEngine:
     """Tests for the core shipping date determination logic."""
 
@@ -42,6 +43,7 @@ class TestShippingDateEngine:
         assert decision.earliest_ship_date is not None
 
 
+@pytest.mark.integration
 class TestOutputFormatting:
     """Tests for output formatting functions."""
 

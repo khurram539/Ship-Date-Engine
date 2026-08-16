@@ -1,3 +1,4 @@
+"""Configuration for Ship Date Engine."""
 import tempfile
 from pathlib import Path
 
