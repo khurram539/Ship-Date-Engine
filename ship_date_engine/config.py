@@ -12,7 +12,11 @@ class Config:
 
     # File handling
     MAX_UPLOAD_SIZE_MB = 25
-    ALLOWED_EXTENSIONS = {".txt", ".csv", ".xlsx", ".xls", ".pdf"}
+    ALLOWED_EXTENSIONS = {
+        ".txt", ".csv", ".json", ".xml",
+        ".xlsx", ".xls", ".pdf",
+        ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp",
+    }
 
     @classmethod
     def create_uploads_dir(cls):
