@@ -11,8 +11,9 @@ DEFAULT_MODELS = [
 
 def get_bedrock_config():
     """Load Bedrock configuration from environment or defaults."""
+    configured_model = os.getenv("BEDROCK_MODEL_ID")
     config = {
         "region": os.getenv("AWS_REGION", AWS_REGION),
-        "models": [m for m in DEFAULT_MODELS if os.getenv("BEDROCK_MODEL_ID") == ""],
+        "models": [configured_model] if configured_model else DEFAULT_MODELS,
     }
     return config

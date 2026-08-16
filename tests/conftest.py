@@ -14,11 +14,11 @@ class TestUtilities:
     def create_temp_file(content: str, suffix: str = ".txt") -> Path:
         fd, path = tempfile.mkstemp(suffix=suffix)
         try:
+            os.close(fd)
             with open(path, "w") as f:
                 f.write(content)
             return Path(path)
         except Exception:
-            os.close(fd)
             raise
 
     @staticmethod
@@ -58,5 +58,5 @@ def sample_invoice_a():
 
 
 @pytest.fixture
-def sample_invoice_b(sample_invoice_a):
+def sample_invoice_b():
     return TestUtilities.create_temp_file(SampleInvoiceData.INVOICE_WITH_CONFLICTS)

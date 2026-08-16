@@ -13,7 +13,7 @@ from .config import Config
 from .date_logic import resolve_shipping_date
 from .extraction import extract_invoice_data
 from .models import ShippingDecision, ValidationResult
-from .security import sanitize_filename, validate_file_content
+from .security import ValidationError, sanitize_filename, validate_file_content
 from .validation import validate_invoices
 
 logger = logging.getLogger(__name__)
