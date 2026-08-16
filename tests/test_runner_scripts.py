@@ -12,7 +12,6 @@ def test_run_server_uses_fastapi_app(monkeypatch):
     def fake_run(app: str, host: str, port: int, reload: bool) -> None:
         captured.update(app=app, host=host, port=port, reload=reload)
 
-    monkeypatch.setattr(run_server, "build_parser", run_server.build_parser)
     monkeypatch.setitem(__import__("sys").modules, "uvicorn", types.SimpleNamespace(run=fake_run))
 
     assert run_server.main(["--host", "0.0.0.0", "--port", "9000", "--reload"]) == 0
@@ -25,6 +24,13 @@ def test_run_server_uses_fastapi_app(monkeypatch):
 
 
 def test_run_tests_defaults_to_tests_directory(monkeypatch):
-    monkeypatch.setattr("pytest.main", lambda args: 0)
+    captured: dict[str, object] = {}
+
+    def fake_pytest_main(args):
+        captured["args"] = args
+        return 0
+
+    monkeypatch.setattr("pytest.main", fake_pytest_main)
 
     assert run_tests.main([]) == 0
+    assert captured == {"args": ["tests/"]}
