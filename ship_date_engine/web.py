@@ -1263,7 +1263,25 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
             self._send_html(_render("", error, True, "single", "daily", False), status=400)
             return
 
-        content_length = int(self.headers.get("Content-Length", -1))
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            content_length = 0
+
+        max_bytes = 25 * 1024 * 1024
+        if content_length <= 0 or content_length > max_bytes:
+            error = (
+                "<section class=\"result error\">"
+                "<h3>Error</h3>"
+                "<pre>Upload too large or missing Content-Length.</pre>"
+                "</section>"
+            )
+            self._send_html(
+                _render("", error, True, "single", "daily", False),
+                status=413,
+            )
+            return
+
         form = _parse_multipart(self.rfile, content_type, content_length)
 
         invoice_file = form.get("invoice_file")
