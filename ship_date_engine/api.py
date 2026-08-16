@@ -54,11 +54,11 @@ async def extract_data_endpoint(shipping_id: str):
             upload_data = json.loads(upload_record)
         else:
             upload_data = upload_record
-        filepath = Path(upload_data.get("filepath"))
+        filepath = Path(upload_data.get("filepath") or "")
         if not filepath.exists():
             raise HTTPException(status_code=404, detail=f"File not found: {filepath}")
         extracted = extract_invoice_data(str(filepath))
-        return {"shipping_id": shipping_id, "extracted_fields": extracted.dict() if hasattr(extracted, "dict") else extracted, "status": "success"}
+        return {"shipping_id": shipping_id, "extracted_fields": extracted.to_dict() if hasattr(extracted, "to_dict") else extracted, "status": "success"}
     except HTTPException:
         raise
     except Exception as e:
