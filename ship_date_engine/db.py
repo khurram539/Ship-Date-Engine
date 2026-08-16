@@ -11,8 +11,22 @@ def get_connection():
 def init_db():
     conn = get_connection()
     c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS uploads (id INTEGER PRIMARY KEY, filename TEXT, filepath TEXT)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS lookups (shipping_id TEXT PRIMARY KEY, result TEXT)""")
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS uploads (
+        id INTEGER PRIMARY KEY,
+        filename TEXT,
+        filepath TEXT,
+        metadata TEXT,
+        created_at INTEGER DEFAULT (strftime('%s','now'))
+        )"""
+    )
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS lookups (
+        shipping_id TEXT PRIMARY KEY,
+        result TEXT,
+        created_at INTEGER DEFAULT (strftime('%s','now'))
+        )"""
+    )
     conn.commit()
     conn.close()
 
