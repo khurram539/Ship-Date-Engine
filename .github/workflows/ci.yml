@@ -51,7 +51,7 @@ jobs:
       
       - name: Install pyright
         run: |
-          pip install pyright
+          pip install "pyright==${PYRIGHT_VERSION}" fastapi pydantic
       
       - name: Run pyright type checking
         run: |

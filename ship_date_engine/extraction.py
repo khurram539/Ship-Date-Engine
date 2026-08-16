@@ -294,7 +294,7 @@ def _read_xlsx_text(path: Path) -> str:
                                 ),
                                 None,
                             )
-                            if text_node is not None:
+                            if text_node is not None and text_node.text is not None:
                                 row_map[col_idx] = text_node.text.strip()
                             value_node = None
                             break
@@ -415,7 +415,7 @@ def _read_xlsx_rows(path: Path) -> list[tuple[str, list[list[str]]]]:
                             ),
                             None,
                         )
-                        if text_node is not None:
+                        if text_node is not None and text_node.text is not None:
                             value = text_node.text.strip()
 
                     if not value:
@@ -427,7 +427,7 @@ def _read_xlsx_rows(path: Path) -> list[tuple[str, list[list[str]]]]:
                             ),
                             None,
                         )
-                        if value_node is not None:
+                        if value_node is not None and value_node.text is not None:
                             value = value_node.text.strip()
 
                     if cell_type == "s" and value:

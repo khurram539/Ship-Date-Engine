@@ -1,6 +1,5 @@
 """REST API endpoints for Ship Date Engine."""
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
-from fastapi.responses import JSONResponse
 from pathlib import Path
 import json
 
@@ -19,13 +18,17 @@ async def health_check():
 @app.post("/upload/{shipping_id}")
 async def upload_invoice(shipping_id: str, invoice: UploadFile = File(...), priority: int = Form(default=100)):
     """Upload an invoice with shipping ID."""
-    ext = Path(invoice.filename).suffix.lower()
+    filename = invoice.filename
+    if not filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    ext = Path(filename).suffix.lower()
     if ext not in Config.ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Invalid file type")
 
     upload_dir = Config.UPLOADS_DIR
     upload_dir.mkdir(parents=True, exist_ok=True)
-    save_path = upload_dir / invoice.filename
+    save_path = upload_dir / filename
     
     max_bytes = Config.MAX_UPLOAD_SIZE_MB * 1024 * 1024
     content = await invoice.read(max_bytes + 1)
@@ -35,7 +38,7 @@ async def upload_invoice(shipping_id: str, invoice: UploadFile = File(...), prio
     with open(save_path, "wb") as buffer:
         buffer.write(content)
     
-    save_upload(invoice.filename, str(save_path), {
+    save_upload(filename, str(save_path), {
         "shipping_id": shipping_id, 
         "priority": priority,
         "size_bytes": len(content)

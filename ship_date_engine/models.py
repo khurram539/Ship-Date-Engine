@@ -83,10 +83,16 @@ class ShippingDecision:
         }
 
     def __repr__(self) -> str:
+        earliest = self.earliest_ship_date.isoformat() if self.earliest_ship_date else None
+        latest = (
+            self.latest_allowable_ship_date.isoformat()
+            if self.latest_allowable_ship_date
+            else None
+        )
         return (
             f"ShippingDecision("
             f"final={self.final_shipping_date.isoformat()!r}, "
-            f"earliest={self.earliest_ship_date.isoformat()!r}, "
-            f"latest={self.latest_allowable_ship_date.isoformat()!r}, "
+            f"earliest={earliest!r}, "
+            f"latest={latest!r}, "
             f"conflicts={len(self.conflicts)})"
         )

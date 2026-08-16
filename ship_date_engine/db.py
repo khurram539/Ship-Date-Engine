@@ -1,6 +1,7 @@
 """Database module for Ship Date Engine API."""
 import sqlite3
 import json
+from typing import Any
 
 
 def get_connection():
@@ -31,15 +32,18 @@ def init_db():
     conn.close()
 
 
-def save_upload(filename, filepath):
+def save_upload(filename: str, filepath: str, metadata: dict[str, Any] | None = None) -> bool:
     try:
         conn = get_connection()
         c = conn.cursor()
-        c.execute("INSERT INTO uploads (filename, filepath) VALUES (?, ?)", (filename, filepath))
+        c.execute(
+            "INSERT INTO uploads (filename, filepath, metadata) VALUES (?, ?, ?)",
+            (filename, filepath, json.dumps(metadata) if metadata is not None else None),
+        )
         conn.commit()
         conn.close()
         return True
-    except:
+    except Exception:
         return False
 
 

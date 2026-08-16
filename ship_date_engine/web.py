@@ -72,7 +72,13 @@ def _parse_multipart(
         name = name_m.group(1)
 
         filename_m = re.search(r'filename="([^"]*)"', cd)
-        raw_bytes: bytes = part.get_payload(decode=True) or b""
+        payload_bytes = part.get_payload(decode=True)
+        if isinstance(payload_bytes, bytes):
+            raw_bytes = payload_bytes
+        elif isinstance(payload_bytes, str):
+            raw_bytes = payload_bytes.encode("utf-8", errors="replace")
+        else:
+            raw_bytes = b""
 
         if filename_m:
             result[name] = _FormFile(
@@ -1226,7 +1232,7 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(csv_bytes)
 
-    def log_message(self, fmt: str, *args) -> None:  # noqa: ANN001
+    def log_message(self, format: str, *args: object) -> None:
         # Suppress the default stderr access log — use Python logging instead.
         pass
 

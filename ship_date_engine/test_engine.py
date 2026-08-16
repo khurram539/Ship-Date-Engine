@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from typing import Any, Callable
 
 from ship_date_engine.engine import determine_shipping_date, determine_shipping_date_single
 from ship_date_engine.output import to_json_output, to_text_output
@@ -15,6 +16,8 @@ from ship_date_engine.date_logic import resolve_shipping_date
 
 class _TempInvoiceMixin:
     """Helper that writes temporary text invoices and registers cleanup."""
+
+    addCleanup: Callable[[Callable[..., object]], None]
 
     def _write_temp(self, content: str) -> str:
         f = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
@@ -57,8 +60,12 @@ class TestShipDateEngine(_TempInvoiceMixin, unittest.TestCase):
 
         invoices, validation, decision = determine_shipping_date(a, b)
         self.assertFalse(validation.errors)
-        self.assertEqual(decision.earliest_ship_date.isoformat(), "2026-05-12")
-        self.assertEqual(decision.latest_allowable_ship_date.isoformat(), "2026-05-17")
+        earliest = decision.earliest_ship_date
+        latest = decision.latest_allowable_ship_date
+        assert earliest is not None
+        assert latest is not None
+        self.assertEqual(earliest.isoformat(), "2026-05-12")
+        self.assertEqual(latest.isoformat(), "2026-05-17")
         self.assertEqual(decision.final_shipping_date.isoformat(), "2026-05-17")
 
         payload = json.loads(to_json_output(invoices, validation, decision))
@@ -208,10 +215,8 @@ class TestOutputFormat(_TempInvoiceMixin, unittest.TestCase):
 
 class TestValidation(unittest.TestCase):
 
-    def _invoice(self, **kwargs) -> InvoiceData:
-        defaults = {"source_path": "test.txt"}
-        defaults.update(kwargs)
-        return InvoiceData(**defaults)
+    def _invoice(self, **kwargs: Any) -> InvoiceData:
+        return InvoiceData(source_path="test.txt", **kwargs)
 
     def test_missing_invoice_number_warning(self):
         inv = self._invoice(invoice_date=date(2026, 1, 1))
@@ -276,7 +281,9 @@ class TestDateLogic(unittest.TestCase):
         ]
         decision = resolve_shipping_date(invoices)
         # Strictest latest is min(2026-03-20, 2026-03-15, 2026-03-18) = 2026-03-15
-        self.assertEqual(decision.latest_allowable_ship_date.isoformat(), "2026-03-15")
+        latest = decision.latest_allowable_ship_date
+        assert latest is not None
+        self.assertEqual(latest.isoformat(), "2026-03-15")
 
     def test_uses_latest_earliest_constraint(self):
         """Earliest allowable date = max of all earliest_ship_dates."""
@@ -294,7 +301,9 @@ class TestDateLogic(unittest.TestCase):
         ]
         decision = resolve_shipping_date(invoices)
         # Max of (2026-04-05, 2026-04-12) = 2026-04-12
-        self.assertEqual(decision.earliest_ship_date.isoformat(), "2026-04-12")
+        earliest = decision.earliest_ship_date
+        assert earliest is not None
+        self.assertEqual(earliest.isoformat(), "2026-04-12")
 
     def test_clamps_target_below_latest(self):
         """If priority ship_by exceeds the latest constraint, clamp to latest."""
