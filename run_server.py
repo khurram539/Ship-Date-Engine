@@ -19,7 +19,10 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError as exc:  # pragma: no cover - exercised via CLI in real use
         raise SystemExit("uvicorn is required to run the API server.") from exc
 
-    uvicorn.run("ship_date_engine.api:app", host=args.host, port=args.port, reload=args.reload)
+    try:
+        uvicorn.run("ship_date_engine.api:app", host=args.host, port=args.port, reload=args.reload)
+    except Exception as exc:  # pragma: no cover - depends on runtime startup failures
+        raise SystemExit(f"Failed to start API server: {exc}") from exc
     return 0
 
 

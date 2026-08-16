@@ -23,6 +23,20 @@ def test_run_server_uses_fastapi_app(monkeypatch):
     }
 
 
+def test_run_server_exits_cleanly_on_startup_failure(monkeypatch):
+    def fake_run(app: str, host: str, port: int, reload: bool) -> None:
+        raise OSError("port already in use")
+
+    monkeypatch.setitem(__import__("sys").modules, "uvicorn", types.SimpleNamespace(run=fake_run))
+
+    try:
+        run_server.main(["--port", "9000"])
+    except SystemExit as exc:
+        assert str(exc) == "Failed to start API server: port already in use"
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Expected SystemExit")
+
+
 def test_run_tests_defaults_to_tests_directory(monkeypatch):
     captured: dict[str, object] = {}
 
