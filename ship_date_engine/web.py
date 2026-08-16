@@ -19,7 +19,7 @@ from .ai_assist import generate_insight
 from .engine import determine_shipping_date_single
 from .extraction import list_shipping_date_records, lookup_shipping_date_record_by_id, research_order_id_in_workbook
 from .output import to_json_output, to_text_output
-from .security import sanitize_filename
+from .security import ValidationError, sanitize_filename
 
 
 RECORDS_PATH = Path(tempfile.gettempdir()) / "ship_date_engine_records.json"
@@ -1353,6 +1353,17 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
                 "<h3>Error</h3>"
                 "<pre>Please upload one file to process, or include a Shipping/Order ID for cached lookup. "
                 "For All Shipping IDs mode, upload an .xlsx file.</pre>"
+                "</section>"
+            )
+            self._send_html(
+                _render(shipping_id, error, enable_ai, lookup_mode, group_by, include_totals),
+                status=400,
+            )
+        except ValidationError as exc:
+            error = (
+                "<section class=\"result error\">"
+                "<h3>Error</h3>"
+                f"<pre>{html.escape(str(exc))}</pre>"
                 "</section>"
             )
             self._send_html(
