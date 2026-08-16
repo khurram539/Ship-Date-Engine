@@ -108,4 +108,4 @@ jobs:
       
       - name: Run integration tests
         run: |
-          pytest tests/ -m integration -v --tb=short
+          PYTHONPATH=$PYTHONPATH:$(pwd) pytest tests/ -m integration -v --tb=short
