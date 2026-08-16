@@ -27,7 +27,10 @@ async def upload_invoice(shipping_id: str, invoice: UploadFile = File(...), prio
     upload_dir.mkdir(parents=True, exist_ok=True)
     save_path = upload_dir / invoice.filename
     
-    content = await invoice.read()
+    max_bytes = Config.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    content = await invoice.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail="File too large")
     
     with open(save_path, "wb") as buffer:
         buffer.write(content)
