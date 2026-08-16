@@ -13,13 +13,10 @@ class TestUtilities:
     @staticmethod
     def create_temp_file(content: str, suffix: str = ".txt") -> Path:
         fd, path = tempfile.mkstemp(suffix=suffix)
-        try:
-            os.close(fd)
-            with open(path, "w") as f:
-                f.write(content)
-            return Path(path)
-        except Exception:
-            raise
+        os.close(fd)
+        with open(path, "w") as f:
+            f.write(content)
+        return Path(path)
 
     @staticmethod
     def create_invoice_file(

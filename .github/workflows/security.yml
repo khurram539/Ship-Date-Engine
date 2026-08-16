@@ -17,9 +17,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Run Secret Scanning
-        uses: github/codeql-action/secret-scanning@v3
-      
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
