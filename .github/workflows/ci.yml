@@ -61,12 +61,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       
       - name: Run secret scanner
-        uses: lannonbr/reviewdog-action-github-pr-review@main
-        with:
-          tool_code_scanning: true
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
   code-quality:
     runs-on: ubuntu-latest
