@@ -61,19 +61,20 @@ def save_lookup(shipping_id, result):
         return False
 
 
-def cleanup_old_lookups(days):
+def cleanup_old_lookups(days: int) -> int:
     try:
         import time
-        now = time.time()
-        cutoff = now - (days * 24 * 3600)
+
+        cutoff = int(time.time() - (days * 24 * 3600))
         conn = get_connection()
         c = conn.cursor()
-        # Simple cleanup - delete old records
         c.execute("DELETE FROM lookups WHERE created_at < ?", (cutoff,))
+        deleted = c.rowcount or 0
         conn.commit()
         conn.close()
-    except:
-        pass
+        return deleted
+    except Exception:
+        return 0
 
 
 init_db()
