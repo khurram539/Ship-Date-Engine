@@ -19,6 +19,7 @@ from .ai_assist import generate_insight
 from .engine import determine_shipping_date_single
 from .extraction import list_shipping_date_records, lookup_shipping_date_record_by_id, research_order_id_in_workbook
 from .output import to_json_output, to_text_output
+from .security import sanitize_filename
 
 
 RECORDS_PATH = Path(tempfile.gettempdir()) / "ship_date_engine_records.json"
@@ -1170,7 +1171,7 @@ def _build_result_from_path(
 
 def _write_uploaded_file(file_field: _FormFile, prefix: str) -> Path:
     """Write the bytes from a parsed multipart file field to a temp file."""
-    original_name = file_field.filename or "uploaded.txt"
+    original_name = sanitize_filename(file_field.filename or "uploaded.txt")
     suffix = Path(original_name).suffix or ".txt"
 
     temp = tempfile.NamedTemporaryFile("wb", suffix=suffix, prefix=prefix, delete=False)
