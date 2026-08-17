@@ -1,0 +1,7 @@
+# API server dependencies
+fastapi>=0.110.0
+uvicorn>=0.29.0
+python-multipart>=0.0.9
+
+# Existing package dependencies
+-r ship_date_engine/requirements.txt
