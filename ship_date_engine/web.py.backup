@@ -287,27 +287,6 @@ HTML_PAGE = """<!doctype html>
                                 Disclaimer: This application is owned by Kaytheon LLC. It provides operational estimates and lookup assistance only, may be updated at any time, and does not replace your official source systems. Always verify shipping dates and business decisions before acting.
                             </div>
                         </footer>
-
-    </footer>
-    <section class="system-status-bar" id="system-status-bar">
-        <div style="display: flex; align-items: center; gap: 16px;">
-            <div class="status-indicator" id="status-dot" 
-                style="width: 20px; height: 20px; border-radius: 50%; 
-                       background: #dcfce7; border: 2px solid #22c55e;"></div>
-            <div style="margin-left: 12px;">
-                <h3 style="margin: 0; font-size: 16px; color: #0f172a;">System Status</h3>
-                <div style="display: flex; gap: 32px; margin-top: 4px;">
-                    <span id="status-api">✓ API Server</span>
-                    <span id="status-db">✓ Database</span>
-                    <span id="status-web">✓ Web Interface</span>
-                </div>
-            </div>
-        </div>
-        <div style="text-align: right; color: #64748b; font-size: 13px;">
-            <strong>All Systems Healthy</strong><br>
-            <span style="font-size: 12px; opacity: 0.8;">Refreshes every 30 seconds</span>
-        </div>
-    </section>
     </section>
   </main>
     <script>
@@ -426,31 +405,6 @@ HTML_PAGE = """<!doctype html>
             <p id="loading-eta" class="loading-eta">Estimated wait: ~10s</p>
         </div>
     </div>
-<script>
-function checkSystemHealth() {
-    fetch('/api/health')
-        .then(r => r.json())
-        .then(data => {
-            if (data.status) {
-                document.getElementById('status-api').innerHTML = '✓ API Server';
-                document.getElementById('status-db').innerHTML = '✓ Database';
-                document.getElementById('status-web').innerHTML = '✓ Web Interface';
-                const statusDot = document.getElementById('status-dot');
-                if (statusDot) statusDot.style.background = '#dcfce7';
-            } else {
-                throw new Error('API unreachable');
-            }
-        })
-        .catch(() => {
-            document.getElementById('status-api').innerHTML = '✗ API Server';
-            document.getElementById('status-db').innerHTML = '✓ Database';
-            document.getElementById('status-web').innerHTML = '✓ Web Interface';
-        });
-}
-
-checkSystemHealth();
-setInterval(checkSystemHealth, 30000); // Refresh every 10 seconds
-</script>
 </body>
 </html>
 """
