@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 """
 Script to add System Status Bar to web.py
-Run this on your EC2 server after pulling from GitHub:
-  curl -L "https://raw.githubusercontent.com/khurram539/Ship-Date-Engine/main/web.py" > web.py.new
-  python3 add_status_bar.py web.py.new web.py.final
-  mv web.py.final /path/to/ship_date_engine/web.py
+Run on your EC2 server after pulling from GitHub:
+
+1. Download clean web.py:
+   curl -L "https://raw.githubusercontent.com/khurram539/Ship-Date-Engine/main/web.py" > ship_date_engine/web.py.new
+
+2. Run this script:
+   curl -L "https://raw.githubusercontent.com/khurram539/Ship-Date-Engine/main/add_status_bar_to_web.py" -o add_status_bar.py
+   python3 add_status_bar.py web.py.new ship_date_engine/web.py.final
+
+3. Start the server:
+   rm -f ship_date_engine/web.py && mv ship_date_engine/web.py.final ship_date_engine/web.py
+   sudo lsof -ti :8000 | xargs -r kill -9 || true
+   nohup python3.11 -m ship_date_engine.web --host 0.0.0.0 --port 8000 > /home/kkhoja/logs/server.log 2>&1 &
 """
 import sys
 
@@ -39,12 +48,9 @@ if(document.getElementById('system-status-bar')){
 </script>
 '''
     
-    # Find the position to insert (before </body> in HTML template)
     lines = html_content.split('\n')
-    
     for i, line in enumerate(lines):
         if '</body>' in line and 'HTML_PAGE' in ''.join(lines[max(0,i-10):i]):
-            # Insert status bar before this </body>
             lines.insert(i, status_bar_html)
             print(f"✅ Status bar inserted at line {i+1}")
             break
@@ -64,19 +70,10 @@ if __name__ == "__main__":
     
     modified = add_status_bar_to_html(html_content)
     
-    # Write to output file
     with open(sys.argv[2], 'w') as f:
         f.write(modified)
     
     print(f"✅ Created {sys.argv[2]}")
-    
-    # Verify it has both features
-    if '__SHIPPING_ID_OPTIONS__' in modified:
-        print("✅ Has dropdown placeholder")
-    else:
-        print("❌ Missing dropdown placeholder")
-    
-    if 'system-status-bar' in modified:
-        print("✅ Has status bar HTML")
-    else:
-        print("❌ Missing status bar")
+    print("\n🎉 Both features now in file!")
+    print("   • Shipping ID dropdown (__SHIPPING_ID_OPTIONS__)")
+    print("   • System Status Bar (system-status-bar HTML & JavaScript)")
