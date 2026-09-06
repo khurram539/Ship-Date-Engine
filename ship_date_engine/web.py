@@ -678,22 +678,6 @@ def _parse_amount_value(value: str) -> float | None:
     return -number if negative else number
 
 
-def _normalize_field_key(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", value.strip().lower())
-
-
-def _parse_details_map(details: str) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for part in (p.strip() for p in details.split("|") if p.strip()):
-        if "=" not in part:
-            continue
-        key, value = part.split("=", 1)
-        normalized = _normalize_field_key(key)
-        if normalized and value.strip():
-            out[normalized] = value.strip()
-    return out
-
-
 def _parse_details_ordered(details: str) -> dict[str, str]:
     """Parse 'header=value | ...' keeping the workbook's column order and headers."""
     fields: dict[str, str] = {}
@@ -715,56 +699,78 @@ def _pretty_header(key: str) -> str:
     return " ".join(w.upper() if w in _HEADER_ACRONYMS else w.capitalize() for w in words)
 
 
-def _pick_detail_value(
-    details_map: dict[str, str],
-    aliases: list[str],
-    allow_prefix_match: bool = True,
-) -> str:
-    normalized_aliases = [_normalize_field_key(alias) for alias in aliases]
-
-    for alias in normalized_aliases:
-        if alias in details_map:
-            return details_map[alias]
-
-    if allow_prefix_match:
-        for alias in normalized_aliases:
-            for key, value in details_map.items():
-                if key.startswith(alias):
-                    return value
-    return ""
+def _is_id_like_key(key: str) -> bool:
+    return bool(re.search(r"\b(id|date|number|no|code|sku|type|column)\b", key))
 
 
-def _extract_additional_fields(details: str) -> dict[str, str]:
-    details_map = _parse_details_map(details)
-    return {
-        "settlement_id": _pick_detail_value(details_map, ["settlement id", "settlementid", "settlementid1"]),
-        "set_id": _pick_detail_value(details_map, ["set id", "setid"]),
-        "trans_type": _pick_detail_value(details_map, ["trans type", "transtype"]),
-        "movement_type": _pick_detail_value(details_map, ["movement type", "movementtype"]),
-        "order_id": _pick_detail_value(details_map, ["order id", "orderid"]),
-        "channel_order": _pick_detail_value(details_map, ["channel order", "channel order #", "channelorder", "channelorder#"]),
-        "sku": _pick_detail_value(details_map, ["sku"]),
-        "cogs": _pick_detail_value(details_map, ["cogs"]),
-        "commission": _pick_detail_value(details_map, ["commission"]),
-        "carrier": _pick_detail_value(details_map, ["carrier", "carriers"]),
-        "channel": _pick_detail_value(details_map, ["channel", "channels"], allow_prefix_match=False),
-        "shipping_cost": _pick_detail_value(details_map, ["shipping cost", "shippingcost"]),
-        "tax": _pick_detail_value(details_map, ["tax", "tax amount", "tax amt", "taxes", "sales tax"]),
-        "transaction_fee": _pick_detail_value(details_map, ["transaction fee", "transactionfee", "transaction fe", "transact"]),
-        "transaction_date": _pick_detail_value(details_map, ["transaction date", "transactiondate"]),
-        "posting_fee": _pick_detail_value(details_map, ["posting fee", "postingfee", "posting f"]),
-        "misc_fees": _pick_detail_value(details_map, ["misc fees", "miscfees"]),
-        "grand_total": _pick_detail_value(details_map, ["grand total", "grandtotal"]),
-        "sc_amount": _pick_detail_value(details_map, ["sc amount", "scamount"]),
-        "price_amount": _pick_detail_value(details_map, ["price amount", "priceamount", "price am"]),
-        "fee_amount": _pick_detail_value(details_map, ["fee amount", "feeamount", "fee am", "fee amo"]),
-        "sc_amount_foreign": _pick_detail_value(details_map, ["sc amount in foreign currency", "scamountinforeigncurrency", "scamour", "scamou"]),
-        "sett_amount": _pick_detail_value(details_map, ["sett amount", "settamount", "set amount"]),
-        "settlement_amount": _pick_detail_value(details_map, ["settlement amount", "settlementamount", "settlemer amount"]),
-        "settlement": _pick_detail_value(details_map, ["settlement"], allow_prefix_match=False),
-        "amount": _pick_detail_value(details_map, ["amount"]),
-        "difference": _pick_detail_value(details_map, ["difference"]),
-    }
+def _extract_matches(record: dict) -> list[dict]:
+    raw = record.get("matches")
+    matches = [m for m in raw if isinstance(m, dict) and m.get("details")] if isinstance(raw, list) else []
+    if not matches and record.get("details"):
+        matches = [{
+            "sheet": record.get("sheet", ""),
+            "shipping_date": record.get("shipping_date", ""),
+            "details": record.get("details", ""),
+        }]
+    return matches
+
+
+def _render_match_tables(matches: list[dict], single_title: str = "Matched Row Details") -> str:
+    blocks: list[str] = []
+    total = len(matches)
+    for idx, match in enumerate(matches, start=1):
+        fields = _parse_details_ordered(match.get("details", ""))
+        rows_html = "".join(
+            f"<tr><th>{html.escape(_pretty_header(k))}</th><td>{html.escape(v)}</td></tr>"
+            for k, v in fields.items()
+        )
+        if not rows_html:
+            continue
+        sheet = match.get("sheet", "")
+        match_date = match.get("shipping_date", "")
+        if total == 1:
+            title = single_title + (f" — Tab: {sheet}" if sheet else "")
+        else:
+            title = f"Match {idx} of {total}"
+            if sheet:
+                title += f" — Tab: {sheet}"
+            if match_date:
+                title += f" ({match_date})"
+        blocks.append(
+            f"<h4>{html.escape(title)}</h4>"
+            f"<table class=\"lookup-table\">{rows_html}</table>"
+        )
+    return "".join(blocks)
+
+
+def _adaptive_totals_block(matches: list[dict]) -> str:
+    """Sum numeric fields across matched rows; columns come from the workbook itself."""
+    all_fields = [_parse_details_ordered(m.get("details", "")) for m in matches]
+    keys: list[str] = []
+    for fields in all_fields:
+        for key in fields:
+            if key not in keys:
+                keys.append(key)
+    rows_html: list[str] = []
+    for key in keys:
+        if _is_id_like_key(key):
+            continue
+        values = [f[key] for f in all_fields if f.get(key, "").strip()]
+        if not values:
+            continue
+        parsed = [_parse_amount_value(v) for v in values]
+        if any(p is None for p in parsed):
+            continue
+        total = sum(p for p in parsed if p is not None)
+        rows_html.append(
+            f"<tr><th>{html.escape(_pretty_header(key))}</th><td>{total:,.2f}</td></tr>"
+        )
+    if not rows_html:
+        return ""
+    return (
+        "<h4>Totals Summary</h4>"
+        f"<table class=\"lookup-table\">{''.join(rows_html)}</table>"
+    )
 
 
 def _build_lookup_result_from_file(
@@ -821,6 +827,8 @@ def _build_lookup_result_from_file(
         )
 
     if record.get("status") == "ambiguous":
+        ambiguous_matches = _extract_matches(record)
+        ambiguous_tables = _render_match_tables(ambiguous_matches, single_title="Matched Row")
         return (
             "<section class=\"result error\">"
             "<h3>Shipping ID Lookup</h3>"
@@ -834,15 +842,16 @@ def _build_lookup_result_from_file(
             "</div>"
             "<h4>Lookup Details</h4>"
             "<table class=\"lookup-table\">"
-            "<tr><th>Message</th><td>Multiple valid shipping dates were found for this Shipping ID.</td></tr>"
-            "<tr><th>Action</th><td>Please provide a more specific file/filter.</td></tr>"
+            "<tr><th>Message</th><td>Multiple valid shipping dates were found for this Shipping ID. "
+            "All matched rows are shown below.</td></tr>"
             "</table>"
+            f"{ambiguous_tables}"
             "</section>"
         )
 
     found_date = record.get("shipping_date", "N/A")
     source_sheet = record.get("sheet", "unknown")
-    details = record.get("details", "")
+    matches = _extract_matches(record)
 
     _record_shipping_date_with_file(
         shipping_id,
@@ -851,85 +860,25 @@ def _build_lookup_result_from_file(
         str(saved_file_path) if saved_file_path is not None else None,
     )
 
-    details_rows = ""
-    additional_fields: dict[str, str] = {}
-    if details:
-        def _pretty_label(raw: str) -> str:
-            cleaned = raw.replace("_", " ").strip()
-            return " ".join(part.capitalize() for part in cleaned.split())
+    tabs: list[str] = []
+    for match in matches:
+        sheet = match.get("sheet", "")
+        if sheet and sheet not in tabs:
+            tabs.append(sheet)
 
-        def _fmt_detail(label: str, value: str) -> str:
-            if "date" in label.lower():
-                parsed = _parse_mmddyyyy_or_serial(value)
-                if parsed:
-                    return parsed
-            return value
+    if len(matches) > 1:
+        third_pill = (
+            "<div class=\"lookup-pill\"><div class=\"label\">Matches</div>"
+            f"<div class=\"value\">{len(matches)} rows across {len(tabs)} tab(s)</div></div>"
+        )
+    else:
+        third_pill = (
+            "<div class=\"lookup-pill\"><div class=\"label\">Source Tab</div>"
+            f"<div class=\"value\">{html.escape(source_sheet)}</div></div>"
+        )
 
-        parts = [p.strip() for p in details.split("|") if p.strip()]
-        rendered_rows: list[str] = []
-        field_index = 1
-        for part in parts:
-            if "=" in part:
-                key, value = part.split("=", 1)
-                pretty_label = _pretty_label(key.strip())
-                pretty_value = _fmt_detail(pretty_label, value.strip())
-                rendered_rows.append(
-                    f"<tr><th>{html.escape(pretty_label)}</th><td>{html.escape(pretty_value)}</td></tr>"
-                )
-            else:
-                rendered_rows.append(
-                    f"<tr><th>Field {field_index}</th><td>{html.escape(part)}</td></tr>"
-                )
-                field_index += 1
-        details_rows = "".join(rendered_rows)
-        additional_fields = _extract_additional_fields(details)
-        transaction_date = additional_fields.get("transaction_date", "")
-        if transaction_date:
-            normalized_txn_date = _parse_mmddyyyy_or_serial(transaction_date)
-            if normalized_txn_date:
-                additional_fields["transaction_date"] = normalized_txn_date
-
-    details_block = (
-        "<h4>Matched Row Details</h4>"
-        f"<table class=\"lookup-table\">{details_rows}</table>"
-        if details_rows
-        else ""
-    )
-
-    totals_block = ""
-    if include_totals and additional_fields:
-        field_labels = {
-            "cogs": "COGS",
-            "commission": "Commission",
-            "shipping_cost": "Shipping Cost",
-            "tax": "Tax",
-            "transaction_fee": "Transaction Fee",
-            "posting_fee": "Posting Fee",
-            "misc_fees": "Misc Fees",
-            "grand_total": "Grand Total",
-            "sc_amount": "SC Amount",
-            "price_amount": "Price Amount",
-            "fee_amount": "Fee Amount",
-            "sc_amount_foreign": "SC Amount in Foreign Currency",
-            "sett_amount": "Sett Amount",
-            "settlement_amount": "Settlement Amount",
-            "amount": "Amount",
-            "difference": "Difference",
-        }
-        totals_rows_html = []
-        for key, label in field_labels.items():
-            parsed = _parse_amount_value(additional_fields.get(key, ""))
-            if parsed is None:
-                continue
-            totals_rows_html.append(
-                f"<tr><th>{html.escape(label)}</th><td>{parsed:,.2f}</td></tr>"
-            )
-
-        if totals_rows_html:
-            totals_block = (
-                "<h4>Totals Summary</h4>"
-                f"<table class=\"lookup-table\">{''.join(totals_rows_html)}</table>"
-            )
+    details_block = _render_match_tables(matches)
+    totals_block = _adaptive_totals_block(matches) if include_totals else ""
 
     return (
         "<section class=\"result\">"
@@ -939,8 +888,7 @@ def _build_lookup_result_from_file(
         f"<div class=\"value\">{html.escape(shipping_id)}</div></div>"
         "<div class=\"lookup-pill\"><div class=\"label\">Shipping Date</div>"
         f"<div class=\"value\">{html.escape(found_date)}</div></div>"
-        "<div class=\"lookup-pill\"><div class=\"label\">Source Tab</div>"
-        f"<div class=\"value\">{html.escape(source_sheet)}</div></div>"
+        f"{third_pill}"
         "</div>"
         f"{totals_block}"
         f"{details_block}"
@@ -1078,7 +1026,7 @@ def _build_all_lookup_result_from_file(
         visible_columns.append(key)
 
     def _is_id_like(key: str) -> bool:
-        return bool(re.search(r"\b(id|date|number|no|code|sku|type|column)\b", key))
+        return _is_id_like_key(key)
 
     numeric_columns: set[str] = set()
     for key in visible_columns:

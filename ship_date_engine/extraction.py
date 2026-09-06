@@ -481,7 +481,7 @@ def _read_xls_text(path: Path) -> str:
 
 def lookup_shipping_date_record_by_id(
     file_path: str, shipping_id: str
-) -> dict[str, str] | None:
+) -> dict | None:
     path = Path(file_path)
     shipping_id_key = _normalize_lookup_id(shipping_id)
     if not shipping_id_key:
@@ -585,10 +585,14 @@ def lookup_shipping_date_record_by_id(
         if not matches:
             return None
 
+        # copies avoid a self-referencing dict when attached to the chosen match
+        row_matches = [dict(m) for m in matches if m.get("details")]
+
         explicit_ambiguous = next(
             (m for m in matches if m.get("status") == "ambiguous"), None
         )
         if explicit_ambiguous is not None:
+            explicit_ambiguous["matches"] = row_matches
             return explicit_ambiguous
 
         distinct_dates = sorted(
@@ -599,11 +603,13 @@ def lookup_shipping_date_record_by_id(
                 "status": "ambiguous",
                 "shipping_id": shipping_id,
                 "candidates": ", ".join(distinct_dates),
+                "matches": row_matches,
             }
 
         chosen = matches[0]
         chosen["status"] = "ok"
         chosen["shipping_id"] = shipping_id
+        chosen["matches"] = row_matches
         return chosen
 
     invoice = extract_invoice_data(str(path))
