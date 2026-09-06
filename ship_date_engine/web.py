@@ -158,6 +158,10 @@ HTML_PAGE = """<!doctype html>
         .tab-panel.active { display: block; }
         .history-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
         .history-table th, .history-table td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; vertical-align: top; }
+        .table-scroll { overflow-x: auto; }
+        .table-scroll .history-table th { white-space: nowrap; }
+        .history-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .history-table tfoot td { font-weight: 700; background: #f8fafc; }
         .history-table th { background: #f8fafc; color: #334155; font-weight: 600; }
         .history-link { color: #0f766e; text-decoration: none; font-weight: 600; }
         .history-link:hover { text-decoration: underline; }
@@ -655,6 +659,27 @@ def _parse_details_map(details: str) -> dict[str, str]:
     return out
 
 
+def _parse_details_ordered(details: str) -> dict[str, str]:
+    """Parse 'header=value | ...' keeping the workbook's column order and headers."""
+    fields: dict[str, str] = {}
+    for part in (p.strip() for p in details.split(" | ") if p.strip()):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key, value = key.strip(), value.strip()
+        if key and value and key not in fields:
+            fields[key] = value
+    return fields
+
+
+_HEADER_ACRONYMS = {"id", "sku", "cogs", "sc", "po", "upc", "vat"}
+
+
+def _pretty_header(key: str) -> str:
+    words = key.replace("_", " ").split()
+    return " ".join(w.upper() if w in _HEADER_ACRONYMS else w.capitalize() for w in words)
+
+
 def _pick_detail_value(
     details_map: dict[str, str],
     aliases: list[str],
@@ -955,7 +980,7 @@ def _build_all_lookup_result_from_file(
         )
 
     group_counts: dict[str, int] = {}
-    enriched_rows: list[dict[str, str]] = []
+    enriched_rows: list[dict] = []
 
     for row in rows:
         shipping_id = row.get("shipping_id", "")
@@ -970,20 +995,13 @@ def _build_all_lookup_result_from_file(
         bucket = _period_bucket(shipping_date, group_by)
         group_counts[bucket] = group_counts.get(bucket, 0) + 1
 
-        additional_fields = _extract_additional_fields(row.get("details", ""))
-        transaction_date = additional_fields.get("transaction_date", "")
-        if transaction_date:
-            normalized_txn_date = _parse_mmddyyyy_or_serial(transaction_date)
-            if normalized_txn_date:
-                additional_fields["transaction_date"] = normalized_txn_date
-
         enriched_rows.append(
             {
                 "shipping_id": shipping_id,
                 "shipping_date": shipping_date,
                 "period": bucket,
                 "source_tab": row.get("sheet", ""),
-                **additional_fields,
+                "fields": _parse_details_ordered(row.get("details", "")),
             }
         )
 
@@ -992,106 +1010,115 @@ def _build_all_lookup_result_from_file(
         for bucket, count in sorted(group_counts.items())
     )
 
-    core_columns = [
-        ("shipping_id", "Shipping ID"),
-        ("shipping_date", "Shipping Date"),
-        ("period", "Period"),
-        ("source_tab", "Source Tab"),
-    ]
-    extra_columns = [
-        ("set_id", "Set ID"),
-        ("trans_type", "Trans Type"),
-        ("movement_type", "Movement Type"),
-        ("order_id", "Order ID"),
-        ("sku", "SKU"),
-        ("cogs", "COGS"),
-        ("commission", "Commission"),
-        ("carrier", "Carrier"),
-        ("shipping_cost", "Shipping Cost"),
-        ("tax", "Tax"),
-        ("transaction_fee", "Transaction Fee"),
-        ("transaction_date", "Transaction Date"),
-        ("posting_fee", "Posting Fee"),
-        ("misc_fees", "Misc Fees"),
-        ("grand_total", "Grand Total"),
-        ("sc_amount", "SC Amount"),
-        ("price_amount", "Price Amount"),
-        ("fee_amount", "Fee Amount"),
-        ("sc_amount_foreign", "SC Amount in Foreign Currency"),
-        ("sett_amount", "Sett Amount"),
-        ("settlement_amount", "Settlement Amount"),
-        ("amount", "Amount"),
-        ("difference", "Difference"),
-    ]
+    # Columns mirror the uploaded workbook: union of headers in first-seen order
+    workbook_columns: list[str] = []
+    for row in enriched_rows:
+        for key in row["fields"]:
+            if key not in workbook_columns:
+                workbook_columns.append(key)
 
-    visible_core = [
-        (key, label)
-        for key, label in core_columns
-        if any((row.get(key, "") or "").strip() for row in enriched_rows)
-    ]
-    visible_extra = [
-        (key, label)
-        for key, label in extra_columns
-        if any((row.get(key, "") or "").strip() for row in enriched_rows)
-    ]
-
-    def _render_dynamic_table(columns: list[tuple[str, str]]) -> str:
-        if not columns:
-            return ""
-        header = "".join(f"<th>{html.escape(label)}</th>" for _, label in columns)
-        body = "".join(
-            "<tr>"
-            + "".join(
-                f"<td>{html.escape(row.get(key, ''))}</td>" for key, _ in columns
-            )
-            + "</tr>"
-            for row in enriched_rows
-        )
-        return (
-            "<table class=\"history-table\">"
-            f"<thead><tr>{header}</tr></thead>"
-            f"<tbody>{body}</tbody>"
-            "</table>"
-        )
-
-    core_table = _render_dynamic_table(visible_core)
-    extra_table = _render_dynamic_table(visible_extra)
-    core_block = f"<h4>Shipping IDs</h4>{core_table}" if core_table else ""
-    extra_block = f"<h4>Additional Fields</h4>{extra_table}" if extra_table else ""
-
-    totals_block = ""
-    if include_totals and enriched_rows:
-        summable_keys = {
-            "cogs", "commission", "shipping_cost", "tax", "transaction_fee",
-            "posting_fee", "misc_fees", "grand_total", "sc_amount", "price_amount",
-            "fee_amount", "sc_amount_foreign", "sett_amount", "settlement_amount",
-            "amount", "difference",
+    def _matches_canonical(row: dict, value: str) -> bool:
+        v = value.strip().casefold()
+        return v in {
+            row["shipping_id"].strip().casefold(),
+            row["shipping_date"].strip().casefold(),
         }
-        sums: dict[str, float] = {}
-        for key, _ in visible_extra:
-            if key not in summable_keys:
-                continue
-            total = 0.0
-            has_numeric = False
-            for row in enriched_rows:
-                parsed = _parse_amount_value(row.get(key, ""))
-                if parsed is None:
-                    continue
-                has_numeric = True
-                total += parsed
-            if has_numeric:
-                sums[key] = total
 
-        if sums:
-            totals_rows_html = "".join(
-                f"<tr><th>{html.escape(label)}</th><td>{sums[key]:,.2f}</td></tr>"
-                for key, label in visible_extra
-                if key in sums
+    visible_columns: list[str] = []
+    for key in workbook_columns:
+        cells = [
+            (row, row["fields"].get(key, ""))
+            for row in enriched_rows
+            if row["fields"].get(key, "").strip()
+        ]
+        if not cells:
+            continue
+        # skip columns that literally duplicate the canonical ID/date shown up front
+        if all(_matches_canonical(row, value) for row, value in cells):
+            for row, value in cells:
+                # keep the workbook's original casing for the lead Shipping ID cell
+                if value.strip().casefold() == row["shipping_id"].strip().casefold():
+                    row["shipping_id"] = value.strip()
+            continue
+        visible_columns.append(key)
+
+    def _is_id_like(key: str) -> bool:
+        return bool(re.search(r"\b(id|date|number|no|code|sku|type|column)\b", key))
+
+    numeric_columns: set[str] = set()
+    for key in visible_columns:
+        values = [row["fields"].get(key, "").strip() for row in enriched_rows]
+        values = [v for v in values if v]
+        if values and not _is_id_like(key) and all(
+            _parse_amount_value(v) is not None for v in values
+        ):
+            numeric_columns.add(key)
+
+    multi_tab = len({row["source_tab"] for row in enriched_rows if row["source_tab"]}) > 1
+
+    lead_columns = [("shipping_id", "Shipping ID"), ("shipping_date", "Shipping Date"), ("period", "Period")]
+    tail_columns = [("source_tab", "Source Tab")] if multi_tab else []
+
+    header_cells = "".join(
+        f"<th>{html.escape(label)}</th>" for _, label in lead_columns
+    )
+    header_cells += "".join(
+        f"<th>{html.escape(_pretty_header(key))}</th>" for key in visible_columns
+    )
+    header_cells += "".join(
+        f"<th>{html.escape(label)}</th>" for _, label in tail_columns
+    )
+
+    body_rows_html: list[str] = []
+    for row in enriched_rows:
+        cells = "".join(
+            f"<td>{html.escape(row[key])}</td>" for key, _ in lead_columns
+        )
+        for key in visible_columns:
+            raw = row["fields"].get(key, "")
+            if key in numeric_columns and raw:
+                parsed = _parse_amount_value(raw)
+                cells += f"<td class=\"num\">{parsed:,.2f}</td>"
+            else:
+                cells += f"<td>{html.escape(raw)}</td>"
+        cells += "".join(
+            f"<td>{html.escape(row[key])}</td>" for key, _ in tail_columns
+        )
+        body_rows_html.append(f"<tr>{cells}</tr>")
+
+    footer_html = ""
+    if include_totals and numeric_columns:
+        sums = {
+            key: sum(
+                parsed
+                for parsed in (
+                    _parse_amount_value(row["fields"].get(key, ""))
+                    for row in enriched_rows
+                )
+                if parsed is not None
             )
-            totals_block = (
-                "<h4>Totals Summary</h4>"
-                f"<table class=\"lookup-table\">{totals_rows_html}</table>"
+            for key in numeric_columns
+        }
+        footer_cells = "<td>Totals</td>" + "<td></td>" * (len(lead_columns) - 1)
+        for key in visible_columns:
+            footer_cells += (
+                f"<td class=\"num\">{sums[key]:,.2f}</td>"
+                if key in numeric_columns
+                else "<td></td>"
             )
+        footer_cells += "<td></td>" * len(tail_columns)
+        footer_html = f"<tfoot><tr>{footer_cells}</tr></tfoot>"
+
+    table_block = (
+        "<h4>Workbook Rows</h4>"
+        "<div class=\"table-scroll\">"
+        "<table class=\"history-table\">"
+        f"<thead><tr>{header_cells}</tr></thead>"
+        f"<tbody>{''.join(body_rows_html)}</tbody>"
+        f"{footer_html}"
+        "</table>"
+        "</div>"
+    )
 
     return (
         "<section class=\"result\">"
@@ -1106,9 +1133,7 @@ def _build_all_lookup_result_from_file(
         "</div>"
         "<h4>Counts by Period</h4>"
         f"<table class=\"lookup-table\">{summary_rows}</table>"
-        f"{totals_block}"
-        f"{core_block}"
-        f"{extra_block}"
+        f"{table_block}"
         "</section>"
     )
 
