@@ -105,7 +105,7 @@ HTML_PAGE = """<!doctype html>
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
   <title>Ship Date Engine</title>
   <style>
-        :root { --bg:#f6f8fb; --card:#ffffff; --text:#0f172a; --muted:#475569; --accent:#0f766e; --accent-2:#1d4ed8; --border:#dbe4ee; --warm:#f59e0b; }
+        :root { --bg:#f6f8fb; --card:#ffffff; --text:#0f172a; --muted:#475569; --accent:#0f766e; --accent-dark:#115e59; --accent-2:#1d4ed8; --border:#dbe4ee; --warm:#f59e0b; }
     * { box-sizing: border-box; }
     body { margin: 0; padding: 24px; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(160deg, #eef6ff 0%, #f7f9fc 60%, #eefcf8 100%); color: var(--text); }
     .wrap { max-width: min(1720px, 96vw); margin: 0 auto; }
@@ -137,8 +137,16 @@ HTML_PAGE = """<!doctype html>
     h1 { margin-top: 0; margin-bottom: 8px; }
     p { color: var(--muted); }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-        input[type="text"], select { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: #fff; }
-    button { margin-top: 12px; background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 10px 14px; font-size: 14px; cursor: pointer; }
+        .form-section { margin-top: 18px; }
+        .form-section:first-child { margin-top: 0; }
+        .field-label { display: block; margin-bottom: 7px; color: #1e293b; font-size: 14px; font-weight: 700; }
+        .field-help { margin: 6px 0 0; color: #64748b; font-size: 13px; line-height: 1.45; }
+        input[type="text"], input[type="file"], select { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: #fff; color: var(--text); font: inherit; }
+        input[type="file"] { padding: 8px; cursor: pointer; }
+        input[type="text"]:focus, input[type="file"]:focus, select:focus, button:focus-visible, .tab-btn:focus-visible, .history-link:focus-visible { outline: 3px solid rgba(29, 78, 216, 0.25); outline-offset: 2px; border-color: var(--accent-2); }
+    button { margin-top: 16px; background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 11px 16px; font-size: 14px; font-weight: 700; cursor: pointer; transition: background 0.15s ease, transform 0.15s ease; }
+        button:hover { background: var(--accent-dark); transform: translateY(-1px); }
+        button:disabled { cursor: wait; opacity: 0.75; transform: none; }
     .result { margin-top: 14px; }
     pre { white-space: pre-wrap; word-wrap: break-word; background: #0b1220; color: #dbeafe; border-radius: 10px; padding: 12px; overflow: auto; }
         .error pre { background: #3f0d10; color: #fee2e2; }
@@ -151,7 +159,7 @@ HTML_PAGE = """<!doctype html>
         .lookup-table th { width: 180px; background: #f8fafc; color: #334155; font-weight: 600; }
         .lookup-hits { margin-top: 8px; padding-left: 18px; }
         .lookup-hits li { margin-bottom: 6px; color: #0f172a; }
-        .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 18px; border-bottom: 1px solid #e2e8f0; }
         .tab-btn { border: 1px solid #cbd5e1; background: #f8fafc; color: #0f172a; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: 600; }
         .tab-btn.active { background: #0f766e; color: #ffffff; border-color: #0f766e; }
         .tab-panel { display: none; }
@@ -178,6 +186,7 @@ HTML_PAGE = """<!doctype html>
         .section-label { margin: 18px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; }
         .section-label:first-child { margin-top: 0; }
         @media (max-width: 900px) { .grid, .hero, .hero-stats { grid-template-columns: 1fr; } }
+        @media (max-width: 560px) { body { padding: 12px; } .card, .hero-panel { padding: 14px; border-radius: 14px; } .tabs { gap: 4px; } .tab-btn { flex: 1; padding: 9px 8px; } .hero-title { font-size: 2.25rem; } }
   </style>
 </head>
 <body>
@@ -223,35 +232,36 @@ HTML_PAGE = """<!doctype html>
         </section>
         <section class="card">
                                                 <p>Upload one invoice file (TXT, CSV, JSON, XML, XLSX, XLS, PDF, or image) and optionally enter a Shipping/Order ID for deep lookup.</p>
-            <div class="tabs">
-                <button type="button" class="tab-btn active" id="tab-btn-lookup" onclick="switchTab('lookup')">Lookup</button>
-                <button type="button" class="tab-btn" id="tab-btn-history" onclick="switchTab('history')">Recent Lookups</button>
+            <div class="tabs" role="tablist" aria-label="Ship date tools">
+                <button type="button" role="tab" aria-selected="true" class="tab-btn active" id="tab-btn-lookup" onclick="switchTab('lookup')">Lookup</button>
+                <button type="button" role="tab" aria-selected="false" class="tab-btn" id="tab-btn-history" onclick="switchTab('history')">Recent Lookups</button>
             </div>
-            <section class="tab-panel active" id="tab-lookup">
+            <section class="tab-panel active" id="tab-lookup" role="tabpanel" aria-labelledby="tab-btn-lookup">
             <form id="lookup-form" method="post" action="/" enctype="multipart/form-data">
                 <input type="hidden" name="action" value="compute" />
-                <div>
-                    <h3>Invoice File</h3>
-                    <input type="file" name="invoice_file" accept=".txt,.csv,.json,.xml,.xlsx,.xls,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp" />
+                <div class="form-section">
+                    <label class="field-label" for="invoice-file">Invoice or workbook</label>
+                    <p class="field-help">Upload a file to calculate a date or discover Shipping IDs. Accepted: TXT, CSV, JSON, XML, Excel, PDF, and images.</p>
+                    <input id="invoice-file" type="file" name="invoice_file" accept=".txt,.csv,.json,.xlsx,.xls,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp" />
         </div>
-                <div>
-                    <h3>Shipping ID</h3>
-                    <input type="text" name="shipping_id" value="__SHIPPING_ID__" placeholder="e.g. SHIP-2026-0042" autocomplete="off" />
-                    <select id="shipping-id-picker" style="margin-top:8px; width:100%;" aria-label="Pick a Shipping ID">
+                <div class="form-section">
+                    <label class="field-label" for="shipping-id">Shipping ID <span style="font-weight:400;color:#64748b;">(optional for all-ID reports)</span></label>
+                    <input id="shipping-id" type="text" name="shipping_id" value="__SHIPPING_ID__" placeholder="e.g. SHIP-2026-0042" autocomplete="off" />
+                    <select id="shipping-id-picker" style="margin-top:8px; width:100%;" aria-label="Pick a recent or uploaded Shipping ID">
                         <option value="">— Pick a recent Shipping ID —</option>
                         __SHIPPING_ID_OPTIONS__
                     </select>
                 </div>
-                <div class="grid" style="margin-top:10px;">
+                <div class="grid form-section">
                     <div>
-                        <h3>Lookup Scope</h3>
+                        <label class="field-label" for="lookup-mode">Lookup scope</label>
                         <select id="lookup-mode" name="lookup_mode">
                             <option value="single" __LOOKUP_MODE_SINGLE__>1 Shipping ID</option>
                             <option value="all" __LOOKUP_MODE_ALL__>All Shipping IDs</option>
                         </select>
                     </div>
                     <div>
-                        <h3>Sort By Period</h3>
+                        <label class="field-label" for="group-by">Group all-ID results by</label>
                         <select id="group-by" name="group_by">
                             <option value="daily" __GROUP_BY_DAILY__>Daily</option>
                             <option value="weekly" __GROUP_BY_WEEKLY__>Weekly</option>
@@ -265,7 +275,7 @@ HTML_PAGE = """<!doctype html>
       </form>
     __RESULT__
                         </section>
-                        <section class="tab-panel" id="tab-history">
+                        <section class="tab-panel" id="tab-history" role="tabpanel" aria-labelledby="tab-btn-history">
                                 <h3>Recent Shipping/Order Lookups</h3>
                                 __HISTORY_TABLE__
                                 <a href="/export.csv" class="export-link">⬇ Export history as CSV</a>
@@ -289,11 +299,15 @@ HTML_PAGE = """<!doctype html>
                 lookupPanel.classList.remove('active');
                 historyBtn.classList.add('active');
                 lookupBtn.classList.remove('active');
+                historyBtn.setAttribute('aria-selected', 'true');
+                lookupBtn.setAttribute('aria-selected', 'false');
             } else {
                 lookupPanel.classList.add('active');
                 historyPanel.classList.remove('active');
                 lookupBtn.classList.add('active');
                 historyBtn.classList.remove('active');
+                lookupBtn.setAttribute('aria-selected', 'true');
+                historyBtn.setAttribute('aria-selected', 'false');
             }
         }
 
