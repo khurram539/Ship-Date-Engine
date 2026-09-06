@@ -231,11 +231,11 @@ HTML_PAGE = """<!doctype html>
         </div>
                 <div>
                     <h3>Shipping ID</h3>
-                    <input type="text" name="shipping_id" list="shipping-id-suggestions" value="__SHIPPING_ID__" placeholder="e.g. SHIP-2026-0042" />
-                    <datalist id="shipping-id-suggestions">
+                    <input type="text" name="shipping_id" value="__SHIPPING_ID__" placeholder="e.g. SHIP-2026-0042" autocomplete="off" />
+                    <select id="shipping-id-picker" style="margin-top:8px; width:100%;" aria-label="Pick a Shipping ID">
+                        <option value="">— Pick a recent Shipping ID —</option>
                         __SHIPPING_ID_OPTIONS__
-                    </datalist>
-                    <select id="shipping-id-picker" style="display:none; margin-top:8px; width:100%;" aria-label="Pick a Shipping ID from the uploaded file"></select>
+                    </select>
                 </div>
                 <div class="grid" style="margin-top:10px;">
                     <div>
@@ -380,19 +380,16 @@ HTML_PAGE = """<!doctype html>
 
         function bindFileDrivenSuggestions() {
             const fileInput = document.querySelector('input[name="invoice_file"]');
-            const datalist = document.getElementById('shipping-id-suggestions');
             const picker = document.getElementById('shipping-id-picker');
             const shippingInput = document.querySelector('input[name="shipping_id"]');
-            if (!fileInput || !datalist) {
+            if (!fileInput || !picker || !shippingInput) {
                 return;
             }
-            if (picker && shippingInput) {
-                picker.addEventListener('change', () => {
-                    if (picker.value) {
-                        shippingInput.value = picker.value;
-                    }
-                });
-            }
+            picker.addEventListener('change', () => {
+                if (picker.value) {
+                    shippingInput.value = picker.value;
+                }
+            });
             fileInput.addEventListener('change', async () => {
                 const file = fileInput.files && fileInput.files[0];
                 if (!file || !file.name.toLowerCase().endsWith('.xlsx')) {
@@ -409,26 +406,17 @@ HTML_PAGE = """<!doctype html>
                     if (!payload.ids || !payload.ids.length) {
                         return;
                     }
-                    datalist.replaceChildren(...payload.ids.map((item) => {
+                    const placeholder = document.createElement('option');
+                    placeholder.value = '';
+                    placeholder.textContent = `\u2014 Pick from file (${payload.ids.length} IDs found) \u2014`;
+                    picker.replaceChildren(placeholder, ...payload.ids.map((item) => {
                         const opt = document.createElement('option');
                         opt.value = item.id;
-                        opt.label = item.date;
+                        opt.textContent = item.date ? `${item.id} \u2014 ${item.date}` : item.id;
                         return opt;
                     }));
-                    if (picker) {
-                        const placeholder = document.createElement('option');
-                        placeholder.value = '';
-                        placeholder.textContent = `\u2014 Pick from file (${payload.ids.length} IDs found) \u2014`;
-                        picker.replaceChildren(placeholder, ...payload.ids.map((item) => {
-                            const opt = document.createElement('option');
-                            opt.value = item.id;
-                            opt.textContent = item.date ? `${item.id} \u2014 ${item.date}` : item.id;
-                            return opt;
-                        }));
-                        picker.style.display = 'block';
-                    }
                 } catch (err) {
-                    // keep the history-based suggestions on failure
+                    // keep the history-based options on failure
                 }
             });
         }
@@ -615,10 +603,14 @@ def _render_shipping_id_options() -> str:
         key=lambda item: item[1].get("updated_at", ""),
         reverse=True,
     )
-    return "".join(
-        f"<option value=\"{html.escape(sid)}\"></option>"
-        for sid, _ in rows[:200]
-    )
+    options = []
+    for sid, payload in rows[:200]:
+        date = payload.get("final_shipping_date", "")
+        text = f"{sid} \u2014 {date}" if date else sid
+        options.append(
+            f"<option value=\"{html.escape(sid)}\">{html.escape(text)}</option>"
+        )
+    return "".join(options)
 
 
 # ── Result builders ───────────────────────────────────────────────────────────
