@@ -306,7 +306,7 @@ HTML_PAGE = """<!doctype html>
                         </section>
                         <footer class="site-footer">
                             <div class="disclaimer">
-                                Disclaimer: This application is owned by Kaytheon LLC. It provides operational estimates and lookup assistance only, may be updated at any time, and does not replace your official source systems. Always verify shipping dates and business decisions before acting.
+                                Disclaimer: Kaytheon LLC provides operational shipping-date and settlement assistance only. Results, including AWS Bedrock AI insights, are estimates and do not replace your official records. You are responsible for maintaining backups of your data; Kaytheon LLC is not responsible for lost data or decisions made using this platform. Verify shipping dates and business decisions before acting.
                             </div>
                         </footer>
     </section>
