@@ -108,7 +108,7 @@ HTML_PAGE = """<!doctype html>
         :root { --bg:#f6f8fb; --card:#ffffff; --text:#0f172a; --muted:#475569; --accent:#0f766e; --accent-2:#1d4ed8; --border:#dbe4ee; --warm:#f59e0b; }
     * { box-sizing: border-box; }
     body { margin: 0; padding: 24px; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(160deg, #eef6ff 0%, #f7f9fc 60%, #eefcf8 100%); color: var(--text); }
-    .wrap { max-width: 1100px; margin: 0 auto; }
+    .wrap { max-width: min(1720px, 96vw); margin: 0 auto; }
         .card { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 18px; box-shadow: 0 8px 24px rgba(2, 6, 23, 0.06); }
         .hero { display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 18px; margin-bottom: 18px; }
         .hero-panel { padding: 22px; border-radius: 22px; border: 1px solid #d7e3f0; background: linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(240,249,255,0.92) 45%, rgba(236,253,245,0.95) 100%); box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08); }
