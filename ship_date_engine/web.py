@@ -1117,6 +1117,50 @@ def _build_all_lookup_result_from_file(
             "</table>"
         )
 
+        money_rows = [
+            row
+            for row in enriched_rows
+            if any(
+                _parse_amount_value(row["fields"].get(key, "")) is not None
+                for key in numeric_columns
+            )
+        ]
+        if money_rows:
+            money_cols = [key for key in visible_columns if key in numeric_columns]
+            money_header = (
+                "<tr><th>Shipping ID</th><th>Shipping Date</th><th>Tab</th>"
+                + "".join(f"<th>{html.escape(_pretty_header(k))}</th>" for k in money_cols)
+                + "</tr>"
+            )
+            money_body = ""
+            for row in money_rows[:50]:
+                cells = (
+                    f"<td>{html.escape(row['shipping_id'])}</td>"
+                    f"<td>{html.escape(row['shipping_date'])}</td>"
+                    f"<td>{html.escape(row['source_tab'])}</td>"
+                )
+                for key in money_cols:
+                    parsed = _parse_amount_value(row["fields"].get(key, ""))
+                    cells += (
+                        f"<td class=\"num\">{parsed:,.2f}</td>" if parsed is not None else "<td></td>"
+                    )
+                money_body += f"<tr>{cells}</tr>"
+            truncated_note = (
+                f"<p>Showing first 50 of {len(money_rows)} rows with money data.</p>"
+                if len(money_rows) > 50
+                else ""
+            )
+            totals_summary_block += (
+                f"<h4>Rows With Money Data ({len(money_rows)})</h4>"
+                "<div class=\"table-scroll\">"
+                "<table class=\"history-table\">"
+                f"<thead>{money_header}</thead>"
+                f"<tbody>{money_body}</tbody>"
+                "</table>"
+                "</div>"
+                f"{truncated_note}"
+            )
+
     table_block = (
         "<h4>Workbook Rows</h4>"
         "<div class=\"table-scroll\">"
