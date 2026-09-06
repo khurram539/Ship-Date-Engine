@@ -56,3 +56,8 @@ mypy_cache/
 # Git
 .git/
 .gitignore
+
+# Local data/artifacts
+ship_date.db
+.pytest_cache/
+.vscode/

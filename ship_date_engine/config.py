@@ -1,4 +1,5 @@
 """Configuration for Ship Date Engine."""
+import os
 import tempfile
 from pathlib import Path
 
@@ -10,6 +11,12 @@ class Config:
     RECORDS_PATH = Path(tempfile.gettempdir()) / "ship_date_engine_records.json"
     UPLOADS_DIR = Path(tempfile.gettempdir()) / "ship_date_engine_uploads"
     TEMP_FILES_DIR = Path(tempfile.gettempdir()) / "ship_date_engine_temp"
+    # Anchored to repo root so it doesn't depend on the process CWD
+    DB_PATH = Path(
+        os.environ.get(
+            "SHIP_DATE_DB", str(Path(__file__).resolve().parent.parent / "ship_date.db")
+        )
+    )
 
     # File handling
     MAX_UPLOAD_SIZE_MB = 25

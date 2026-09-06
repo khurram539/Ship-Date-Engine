@@ -3,9 +3,11 @@ import sqlite3
 import json
 from typing import Any, Dict, Optional
 
+from .config import Config
+
 
 def get_connection():
-    conn = sqlite3.connect("ship_date.db")
+    conn = sqlite3.connect(str(Config.DB_PATH))
     return conn
 
 
