@@ -1063,18 +1063,21 @@ def _build_all_lookup_result_from_file(
         body_rows_html.append(f"<tr>{cells}</tr>")
 
     footer_html = ""
+    totals_summary_block = ""
     if include_totals and numeric_columns:
-        sums = {
-            key: sum(
+        sums: dict[str, float] = {}
+        counts: dict[str, int] = {}
+        for key in numeric_columns:
+            parsed_values = [
                 parsed
                 for parsed in (
                     _parse_amount_value(row["fields"].get(key, ""))
                     for row in enriched_rows
                 )
                 if parsed is not None
-            )
-            for key in numeric_columns
-        }
+            ]
+            sums[key] = sum(parsed_values)
+            counts[key] = len(parsed_values)
         footer_cells = "<td>Totals</td>" + "<td></td>" * (len(lead_columns) - 1)
         for key in visible_columns:
             footer_cells += (
@@ -1084,6 +1087,21 @@ def _build_all_lookup_result_from_file(
             )
         footer_cells += "<td></td>" * len(tail_columns)
         footer_html = f"<tfoot><tr>{footer_cells}</tr></tfoot>"
+
+        summary_totals_rows = "".join(
+            f"<tr><th>{html.escape(_pretty_header(key))}</th>"
+            f"<td>{sums[key]:,.2f}</td>"
+            f"<td>{counts[key]} of {len(enriched_rows)} rows</td></tr>"
+            for key in visible_columns
+            if key in numeric_columns
+        )
+        totals_summary_block = (
+            "<h4>Totals Summary</h4>"
+            "<table class=\"lookup-table\">"
+            "<thead><tr><th>Field</th><th>Total</th><th>Rows With Data</th></tr></thead>"
+            f"<tbody>{summary_totals_rows}</tbody>"
+            "</table>"
+        )
 
     table_block = (
         "<h4>Workbook Rows</h4>"
@@ -1109,6 +1127,7 @@ def _build_all_lookup_result_from_file(
         "</div>"
         "<h4>Counts by Period</h4>"
         f"<table class=\"lookup-table\">{summary_rows}</table>"
+        f"{totals_summary_block}"
         f"{table_block}"
         "</section>"
     )
