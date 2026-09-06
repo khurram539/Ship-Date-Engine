@@ -16,13 +16,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .ai_assist import generate_insight
+from .config import Config
+from .db import get_all_lookups, get_cached_lookup, save_lookup
 from .engine import determine_shipping_date_single
 from .extraction import list_shipping_date_records, lookup_shipping_date_record_by_id, research_order_id_in_workbook
 from .output import to_json_output
+from .security import ValidationError, sanitize_filename
 
 
-RECORDS_PATH = Path(tempfile.gettempdir()) / "ship_date_engine_records.json"
-UPLOADS_DIR = Path(tempfile.gettempdir()) / "ship_date_engine_uploads"
+# Legacy JSON store; migrated into SQLite on first read
+RECORDS_PATH = Config.RECORDS_PATH
+UPLOADS_DIR = Config.UPLOADS_DIR
 
 
 # ── Multipart form parser (replaces deprecated cgi module) ───────────────────
@@ -433,18 +437,28 @@ def _render(
     return html_doc.encode("utf-8")
 
 
-def _load_records() -> dict[str, dict[str, str]]:
+def _migrate_legacy_records() -> None:
     if not RECORDS_PATH.exists():
-        return {}
+        return
     try:
         payload = json.loads(RECORDS_PATH.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
-        return {}
-    return payload if isinstance(payload, dict) else {}
+        payload = {}
+    if isinstance(payload, dict):
+        existing = get_all_lookups()
+        for shipping_id, record in payload.items():
+            if shipping_id not in existing and isinstance(record, dict):
+                save_lookup(shipping_id, record)
+    try:
+        RECORDS_PATH.rename(RECORDS_PATH.with_suffix(".json.migrated"))
+    except OSError:
+        pass
 
 
-def _save_records(records: dict[str, dict[str, str]]) -> None:
-    RECORDS_PATH.write_text(json.dumps(records, indent=2), encoding="utf-8")
+def _load_records() -> dict[str, dict[str, str]]:
+    _migrate_legacy_records()
+    records = get_all_lookups()
+    return {k: v for k, v in records.items() if isinstance(v, dict)}
 
 
 def _record_shipping_date(
@@ -461,29 +475,27 @@ def _record_shipping_date_with_file(
 ) -> None:
     if not shipping_id.strip():
         return
-    records = _load_records()
-    existing = records.get(shipping_id.strip(), {})
-    records[shipping_id.strip()] = {
+    key = shipping_id.strip()
+    existing = _lookup_shipping_date(key) or {}
+    save_lookup(key, {
         "final_shipping_date": final_shipping_date,
         "source_path": source_path,
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "saved_file_path": saved_file_path or existing.get("saved_file_path", ""),
-    }
-    _save_records(records)
+    })
 
 
 def _record_saved_file(shipping_id: str, saved_file_path: str) -> None:
     if not shipping_id.strip() or not saved_file_path.strip():
         return
-    records = _load_records()
-    existing = records.get(shipping_id.strip(), {})
-    records[shipping_id.strip()] = {
+    key = shipping_id.strip()
+    existing = _lookup_shipping_date(key) or {}
+    save_lookup(key, {
         "final_shipping_date": existing.get("final_shipping_date", ""),
         "source_path": existing.get("source_path", saved_file_path),
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "saved_file_path": saved_file_path,
-    }
-    _save_records(records)
+    })
 
 
 def _sanitize_id_for_filename(value: str) -> str:
@@ -516,7 +528,9 @@ def _iter_saved_upload_files(limit: int = 50) -> list[Path]:
 def _lookup_shipping_date(shipping_id: str) -> dict[str, str] | None:
     if not shipping_id.strip():
         return None
-    return _load_records().get(shipping_id.strip())
+    _migrate_legacy_records()
+    record = get_cached_lookup(shipping_id.strip())
+    return record if isinstance(record, dict) else None
 
 
 def _render_history_table() -> str:
@@ -1237,7 +1251,10 @@ def _build_result_from_path(
 
 def _write_uploaded_file(file_field: _FormFile, prefix: str) -> Path:
     """Write the bytes from a parsed multipart file field to a temp file."""
-    original_name = file_field.filename or "uploaded.txt"
+    try:
+        original_name = sanitize_filename(file_field.filename or "uploaded.txt")
+    except ValidationError:
+        original_name = "uploaded.txt"
     suffix = Path(original_name).suffix or ".txt"
 
     temp = tempfile.NamedTemporaryFile("wb", suffix=suffix, prefix=prefix, delete=False)

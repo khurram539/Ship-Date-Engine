@@ -69,6 +69,24 @@ def get_cached_lookup(shipping_id):
         return None
 
 
+def get_all_lookups() -> Dict[str, Any]:
+    """Return all cached lookups as {shipping_id: parsed_result}."""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT shipping_id, result FROM lookups")
+        results: Dict[str, Any] = {}
+        for shipping_id, result in c.fetchall():
+            try:
+                results[shipping_id] = json.loads(result) if isinstance(result, str) else result
+            except (TypeError, ValueError):
+                continue
+        conn.close()
+        return results
+    except Exception:
+        return {}
+
+
 def save_lookup(shipping_id, result):
     try:
         conn = get_connection()
