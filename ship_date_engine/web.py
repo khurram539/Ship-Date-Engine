@@ -700,7 +700,11 @@ def _pretty_header(key: str) -> str:
 
 
 def _is_id_like_key(key: str) -> bool:
-    return bool(re.search(r"\b(id|date|number|no|code|sku|type|column)\b", key))
+    if re.search(r"\b(id|date|number|no|code|sku|type|column)\b", key):
+        return True
+    compact = re.sub(r"[^a-z0-9]", "", key.lower())
+    # catches compact headers like setid/settlementid1 but not paid/prepaid
+    return bool(re.search(r"(?<!pa)id\d*$", compact))
 
 
 def _extract_matches(record: dict) -> list[dict]:
@@ -1363,10 +1367,10 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
             return
         if self.path != "/":
             self._send_html(
-                _render("", "", True, "single", "daily", False), status=404
+                _render("", "", True, "single", "daily", True), status=404
             )
             return
-        self._send_html(_render("", "", True, "single", "daily", False))
+        self._send_html(_render("", "", True, "single", "daily", True))
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path == "/api/shipping-ids":
@@ -1375,7 +1379,7 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
 
         if self.path != "/":
             self._send_html(
-                _render("", "", True, "single", "daily", False), status=404
+                _render("", "", True, "single", "daily", True), status=404
             )
             return
 
@@ -1388,7 +1392,7 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
                 "<pre>Unsupported request format. Please submit using the upload form.</pre>"
                 "</section>"
             )
-            self._send_html(_render("", error, True, "single", "daily", False), status=400)
+            self._send_html(_render("", error, True, "single", "daily", True), status=400)
             return
 
         content_length = int(self.headers.get("Content-Length", -1))
