@@ -45,12 +45,8 @@ def _build_prompt(
 
 # ── Direct Anthropic API backend ──────────────────────────────────────────────
 
-def generate_anthropic_insight(
-    invoices: list[InvoiceData],
-    validation: ValidationResult,
-    decision: ShippingDecision,
-) -> str:
-    """Generate insight using the direct Anthropic API.
+def _complete_anthropic(prompt: str) -> str:
+    """Send a prompt to the direct Anthropic API.
 
     Requires:
     - ``pip install anthropic``
@@ -73,7 +69,6 @@ def generate_anthropic_insight(
         )
 
     model_id = os.getenv("ANTHROPIC_MODEL_ID", DEFAULT_ANTHROPIC_MODEL)
-    prompt = _build_prompt(invoices, validation, decision)
 
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
@@ -88,22 +83,18 @@ def generate_anthropic_insight(
     return message.content[0].text.strip()
 
 
-# ── AWS Bedrock backend ───────────────────────────────────────────────────────
-
-def generate_bedrock_insight(
+def generate_anthropic_insight(
     invoices: list[InvoiceData],
     validation: ValidationResult,
     decision: ShippingDecision,
 ) -> str:
-    """Generate insight via AWS Bedrock.
+    return _complete_anthropic(_build_prompt(invoices, validation, decision))
 
-    Requires:
-    - ``pip install boto3``
-    - AWS credentials in environment (``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``, etc.)
 
-    Override the model with ``BEDROCK_MODEL_ID``.
-    Override the region with ``AWS_REGION`` or ``AWS_DEFAULT_REGION``.
-    """
+# ── AWS Bedrock backend ─────────────────────────────────────────────────────────────────
+
+def _complete_bedrock(prompt: str) -> str:
+    """Send a prompt to AWS Bedrock, trying configured/fallback models."""
     try:
         import boto3  # type: ignore
     except ImportError as exc:
@@ -113,7 +104,6 @@ def generate_bedrock_insight(
 
     requested_model_id = os.getenv("BEDROCK_MODEL_ID", "").strip()
     region = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
-    prompt = _build_prompt(invoices, validation, decision)
 
     client = boto3.client("bedrock-runtime", region_name=region)
 
@@ -165,6 +155,46 @@ def generate_bedrock_insight(
         f"Tried: {', '.join(models_to_try)}. "
         f"Errors: {' | '.join(errors)}"
     )
+
+
+def generate_bedrock_insight(
+    invoices: list[InvoiceData],
+    validation: ValidationResult,
+    decision: ShippingDecision,
+) -> str:
+    """Generate insight via AWS Bedrock (see _complete_bedrock for env config)."""
+    return _complete_bedrock(_build_prompt(invoices, validation, decision))
+
+
+def _complete(prompt: str) -> str:
+    if os.getenv("ANTHROPIC_API_KEY", "").strip():
+        return _complete_anthropic(prompt)
+    return _complete_bedrock(prompt)
+
+
+def generate_lookup_insight(
+    shipping_id: str, shipping_date: str, matches: list[dict]
+) -> str:
+    """Generate an AI insight for a Shipping ID lookup across workbook rows."""
+    rows = [
+        {
+            "sheet": m.get("sheet", ""),
+            "shipping_date": m.get("shipping_date", ""),
+            "fields": (m.get("details", "") or "")[:600],
+        }
+        for m in matches[:10]
+    ]
+    prompt = (
+        "You are an operations assistant for shipping and settlement review. "
+        "Given the matched workbook rows for one Shipping/Order ID, provide:\n"
+        "1) A one-line summary of what happened with this order.\n"
+        "2) Any anomalies or risks (refunds, fee mismatches, date conflicts).\n"
+        "3) A recommended next action.\n"
+        "Keep the response under 120 words.\n\n"
+        f"Shipping ID: {shipping_id}\nShipping Date: {shipping_date}\n"
+        f"Matched rows:\n{json.dumps(rows, indent=2)}"
+    )
+    return _complete(prompt)
 
 
 # ── Auto-selecting entry point ────────────────────────────────────────────────

@@ -15,7 +15,7 @@ from email.policy import compat32
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .ai_assist import generate_insight
+from .ai_assist import generate_insight, generate_lookup_insight
 from .config import Config
 from .db import get_all_lookups, get_cached_lookup, save_lookup
 from .engine import determine_shipping_date_single
@@ -756,6 +756,14 @@ def _adaptive_totals_block(matches: list[dict]) -> str:
     )
 
 
+def _ai_lookup_block(shipping_id: str, shipping_date: str, matches: list[dict]) -> str:
+    try:
+        insight = generate_lookup_insight(shipping_id, shipping_date, matches)
+        return f"<h4>AI Assist</h4><pre>{html.escape(insight)}</pre>"
+    except Exception as exc:  # noqa: BLE001
+        return f"<h4>AI Assist</h4><pre>AI assist unavailable: {html.escape(str(exc))}</pre>"
+
+
 def _build_lookup_result_from_file(
     invoice_path: Path,
     shipping_id: str,
@@ -862,6 +870,7 @@ def _build_lookup_result_from_file(
 
     details_block = _render_match_tables(matches)
     totals_block = _adaptive_totals_block(matches) if include_totals else ""
+    ai_block = _ai_lookup_block(shipping_id, found_date, matches)
 
     return (
         "<section class=\"result\">"
@@ -875,6 +884,7 @@ def _build_lookup_result_from_file(
         "</div>"
         f"{totals_block}"
         f"{details_block}"
+        f"{ai_block}"
         "</section>"
     )
 
