@@ -396,7 +396,42 @@ HTML_PAGE = """<!doctype html>
             });
         }
 
+        function bindFileDrivenSuggestions() {
+            const fileInput = document.querySelector('input[name="invoice_file"]');
+            const datalist = document.getElementById('shipping-id-suggestions');
+            if (!fileInput || !datalist) {
+                return;
+            }
+            fileInput.addEventListener('change', async () => {
+                const file = fileInput.files && fileInput.files[0];
+                if (!file || !file.name.toLowerCase().endsWith('.xlsx')) {
+                    return;
+                }
+                const data = new FormData();
+                data.append('invoice_file', file);
+                try {
+                    const resp = await fetch('/api/shipping-ids', { method: 'POST', body: data });
+                    if (!resp.ok) {
+                        return;
+                    }
+                    const payload = await resp.json();
+                    if (!payload.ids || !payload.ids.length) {
+                        return;
+                    }
+                    datalist.replaceChildren(...payload.ids.map((item) => {
+                        const opt = document.createElement('option');
+                        opt.value = item.id;
+                        opt.label = item.date;
+                        return opt;
+                    }));
+                } catch (err) {
+                    // keep the history-based suggestions on failure
+                }
+            });
+        }
+
         bindLoadingState();
+        bindFileDrivenSuggestions();
     </script>
     <div id="loading-overlay" class="loading-overlay" aria-live="polite" aria-label="Loading results">
         <div class="loading-card">
@@ -1310,6 +1345,32 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _handle_shipping_ids_api(self) -> None:
+        """Return the Shipping IDs found in an uploaded workbook (for the datalist)."""
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            self._send_json({"error": "multipart form expected"}, status=400)
+            return
+        content_length = int(self.headers.get("Content-Length", -1))
+        form = _parse_multipart(self.rfile, content_type, content_length)
+        invoice_file = form.get("invoice_file")
+        if not isinstance(invoice_file, _FormFile) or not invoice_file.filename:
+            self._send_json({"error": "no file provided"}, status=400)
+            return
+        file_path = _write_uploaded_file(invoice_file, "suggest_")
+        try:
+            records = list_shipping_date_records(str(file_path))
+        finally:
+            file_path.unlink(missing_ok=True)
+        seen: set[str] = set()
+        ids: list[dict[str, str]] = []
+        for rec in records:
+            sid = rec.get("shipping_id", "")
+            if sid and sid not in seen:
+                seen.add(sid)
+                ids.append({"id": sid, "date": rec.get("shipping_date", "")})
+        self._send_json({"ids": ids})
+
     def _send_csv_export(self) -> None:
         """Stream the full lookup history as a UTF-8 CSV download."""
         records = _load_records()
@@ -1360,6 +1421,10 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
         self._send_html(_render("", "", True, "single", "daily", False))
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/api/shipping-ids":
+            self._handle_shipping_ids_api()
+            return
+
         if self.path != "/":
             self._send_html(
                 _render("", "", True, "single", "daily", False), status=404
@@ -1419,6 +1484,17 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
                     _record_saved_file(shipping_id, str(saved_path))
                     result = _build_lookup_result_from_file(
                         file_path, shipping_id, saved_path, include_totals
+                    )
+                    self._send_html(
+                        _render(shipping_id, result, enable_ai, lookup_mode, group_by, include_totals)
+                    )
+                    return
+
+                # Spreadsheets have no free-text fields to mine; use structured rows
+                if file_path.suffix.lower() == ".xlsx":
+                    saved_path = _persist_uploaded_file(file_path, "workbook")
+                    result = _build_all_lookup_result_from_file(
+                        file_path, group_by, saved_path, include_totals
                     )
                     self._send_html(
                         _render(shipping_id, result, enable_ai, lookup_mode, group_by, include_totals)
