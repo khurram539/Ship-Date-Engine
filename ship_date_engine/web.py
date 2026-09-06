@@ -211,7 +211,7 @@ HTML_PAGE = """<!doctype html>
                     <ul class="info-list">
                         <li>Upload one file per request.</li>
                         <li>Choose single-ID or all-ID mode.</li>
-                        <li>AI Assist and totals are on by default.</li>
+                        <li>AI Assist and totals run automatically.</li>
                     </ul>
                 </div>
             </div>
@@ -254,16 +254,6 @@ HTML_PAGE = """<!doctype html>
                             <option value="annual" __GROUP_BY_ANNUAL__>Annual</option>
                         </select>
                     </div>
-                </div>
-                <div style="margin-top:10px;">
-                    <label>
-                        <input type="checkbox" name="enable_ai" __ENABLE_AI__ /> Enable AI Assist
-                    </label>
-                </div>
-                <div style="margin-top:10px;">
-                    <label>
-                        <input type="checkbox" name="include_totals" __INCLUDE_TOTALS__ /> Include totals summary (Tax, Transaction Fee, etc.)
-                    </label>
                 </div>
             <button id="submit-btn" type="submit">Calculate Shipping Date</button>
       </form>
@@ -451,8 +441,6 @@ def _render(
     shipping_id_options = _render_shipping_id_options()
     html_doc = (
         HTML_PAGE.replace("__SHIPPING_ID__", html.escape(shipping_id))
-        .replace("__ENABLE_AI__", "checked" if enable_ai else "")
-        .replace("__INCLUDE_TOTALS__", "checked" if include_totals else "")
         .replace("__SHIPPING_ID_OPTIONS__", shipping_id_options)
         .replace("__LOOKUP_MODE_SINGLE__", "selected" if lookup_mode == "single" else "")
         .replace("__LOOKUP_MODE_ALL__", "selected" if lookup_mode == "all" else "")
@@ -1393,8 +1381,9 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
         if not isinstance(invoice_file, _FormFile):
             invoice_file = None
 
-        enable_ai = _form_str(form, "enable_ai") == "on"
-        include_totals = _form_str(form, "include_totals") == "on"
+        # AI assist and totals always run; no UI toggles
+        enable_ai = True
+        include_totals = True
         shipping_id = _form_str(form, "shipping_id")
 
         lookup_mode = _form_str(form, "lookup_mode", "single").strip().lower()
