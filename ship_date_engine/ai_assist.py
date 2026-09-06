@@ -197,6 +197,20 @@ def generate_lookup_insight(
     return _complete(prompt)
 
 
+def generate_all_lookup_insight(report: dict) -> str:
+    """Generate a bounded operational summary for an All Shipping IDs report."""
+    prompt = (
+        "You are an operations assistant for shipping and settlement review. "
+        "Analyze this aggregated All Shipping IDs report and provide:\n"
+        "1) A brief operational summary.\n"
+        "2) Notable exceptions, risks, or data-quality concerns.\n"
+        "3) A recommended next action.\n"
+        "Do not invent facts. Keep the response under 150 words.\n\n"
+        f"Report:\n{json.dumps(report, indent=2)}"
+    )
+    return _complete(prompt)
+
+
 # ── Auto-selecting entry point ────────────────────────────────────────────────
 
 def generate_insight(

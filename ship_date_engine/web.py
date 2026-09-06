@@ -16,7 +16,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import cast
 
-from .ai_assist import generate_insight, generate_lookup_insight
+from .ai_assist import (
+    generate_all_lookup_insight,
+    generate_insight,
+    generate_lookup_insight,
+)
 from .config import Config
 from .db import get_all_lookups, get_cached_lookup, save_lookup
 from .engine import determine_shipping_date_single
@@ -858,6 +862,14 @@ def _ai_lookup_block(shipping_id: str, shipping_date: str, matches: list[dict]) 
         return f"<h4>AI Assist</h4><pre>AI assist unavailable: {html.escape(str(exc))}</pre>"
 
 
+def _ai_all_lookup_block(report: dict) -> str:
+    try:
+        insight = generate_all_lookup_insight(report)
+        return f"<h4>AI Report Summary</h4><pre>{html.escape(insight)}</pre>"
+    except Exception as exc:  # noqa: BLE001
+        return f"<h4>AI Report Summary</h4><pre>AI assist unavailable: {html.escape(str(exc))}</pre>"
+
+
 def _build_lookup_result_from_file(
     invoice_path: Path,
     shipping_id: str,
@@ -1158,6 +1170,8 @@ def _build_all_lookup_result_from_file(
 
     footer_html = ""
     totals_summary_block = ""
+    ai_totals: dict[str, dict[str, float | int]] = {}
+    money_rows: list[dict] = []
     if include_totals and numeric_columns:
         sums: dict[str, float] = {}
         counts: dict[str, int] = {}
@@ -1172,6 +1186,10 @@ def _build_all_lookup_result_from_file(
             ]
             sums[key] = sum(parsed_values)
             counts[key] = len(parsed_values)
+        ai_totals = {
+            _pretty_header(key): {"total": sums[key], "rows_with_data": counts[key]}
+            for key in numeric_columns
+        }
         footer_cells = "<td>Totals</td>" + "<td></td>" * (len(lead_columns) - 1)
         for key in visible_columns:
             footer_cells += (
@@ -1241,6 +1259,29 @@ def _build_all_lookup_result_from_file(
                 f"{truncated_note}"
             )
 
+    ai_report = {
+        "total_shipping_ids": len(enriched_rows),
+        "grouping": group_by,
+        "counts_by_period": group_counts,
+        "source_tabs": sorted({row["source_tab"] for row in enriched_rows if row["source_tab"]}),
+        "numeric_totals": ai_totals,
+        "money_rows_count": len(money_rows),
+        "money_row_sample": [
+            {
+                "shipping_id": row["shipping_id"],
+                "shipping_date": row["shipping_date"],
+                "tab": row["source_tab"],
+                "numeric_fields": {
+                    _pretty_header(key): row["fields"].get(key, "")
+                    for key in numeric_columns
+                    if row["fields"].get(key, "")
+                },
+            }
+            for row in money_rows[:10]
+        ],
+    }
+    ai_block = _ai_all_lookup_block(ai_report)
+
     table_block = (
         "<h4>Workbook Rows</h4>"
         "<div class=\"table-scroll\">"
@@ -1265,6 +1306,7 @@ def _build_all_lookup_result_from_file(
         "</div>"
         "<h4>Counts by Period</h4>"
         f"<table class=\"lookup-table\">{summary_rows}</table>"
+        f"{ai_block}"
         f"{totals_summary_block}"
         f"{table_block}"
         "</section>"
