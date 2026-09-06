@@ -204,7 +204,12 @@ HTML_PAGE = """<!doctype html>
             <div class="hero-side">
                 <div class="info-card">
                     <h3>What changed</h3>
-                    <p>The page now points users to the updated code paths: smarter file parsing, cached history, and a cleaner export flow.</p>
+                    <ul class="info-list">
+                        <li>Result tables now mirror the columns in your uploaded Excel.</li>
+                        <li>Single-ID lookups show every matching row across all tabs.</li>
+                        <li>Totals Summary highlights which rows carry the money data.</li>
+                        <li>Shipping ID dropdown fills from your file automatically.</li>
+                    </ul>
                 </div>
                 <div class="info-card">
                     <h3>Quick workflow</h3>
