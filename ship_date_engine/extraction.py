@@ -491,7 +491,7 @@ def lookup_shipping_date_record_by_id(
 
     if suffix == ".xlsx":
         sheets = _read_xlsx_rows(path)
-        matches: list[dict[str, str]] = []
+        matches: list[dict[str, object]] = []
 
         for sheet_name, rows in sheets:
             if not rows:
@@ -596,7 +596,11 @@ def lookup_shipping_date_record_by_id(
             return explicit_ambiguous
 
         distinct_dates = sorted(
-            {m.get("shipping_date", "") for m in matches if m.get("shipping_date")}
+            {
+                value
+                for m in matches
+                if isinstance(value := m.get("shipping_date"), str) and value
+            }
         )
         if len(distinct_dates) > 1:
             return {

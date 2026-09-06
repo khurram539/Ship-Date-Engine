@@ -14,6 +14,7 @@ from email.parser import BytesFeedParser
 from email.policy import compat32
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import cast
 
 from .ai_assist import generate_insight, generate_lookup_insight
 from .config import Config
@@ -76,7 +77,7 @@ def _parse_multipart(
         name = name_m.group(1)
 
         filename_m = re.search(r'filename="([^"]*)"', cd)
-        raw_bytes: bytes = part.get_payload(decode=True) or b""
+        raw_bytes = cast(bytes, part.get_payload(decode=True) or b"")
 
         if filename_m:
             result[name] = _FormFile(
@@ -1425,7 +1426,7 @@ class ShipDateWebHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(csv_bytes)
 
-    def log_message(self, fmt: str, *args) -> None:  # noqa: ANN001
+    def log_message(self, format: str, *args) -> None:  # noqa: ANN001
         # Suppress the default stderr access log — use Python logging instead.
         pass
 
