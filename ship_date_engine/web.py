@@ -182,40 +182,6 @@ HTML_PAGE = """<!doctype html>
 </head>
 <body>
   <main class=\"wrap\">
-        <section class="hero">
-            <div class="hero-panel">
-                <div class="owner-banner" role="img" aria-label="Kaytheon LLC ownership logo">
-                        <svg class="owner-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                <rect x="14" y="24" width="24" height="52" rx="2" fill="#000000"/>
-                                <path d="M38 50 C50 50, 52 38, 66 24 L86 24 C72 33, 66 42, 60 50 C66 58, 72 67, 86 76 L66 76 C52 62, 50 50, 38 50 Z" fill="#f7c044"/>
-                                <circle cx="38" cy="50" r="11" fill="#f7c044"/>
-                        </svg>
-                        <div class="owner-text"><strong>Kaytheon LLC</strong></div>
-                </div>
-                <div class="hero-kicker">New code update</div>
-                <h1 class="hero-title">Ship Date Engine</h1>
-                <p class="hero-copy">Upload a workbook or invoice, look up a single Shipping ID, or generate an all-ID summary by period. The web app now reflects the newer parsing and AI-assist workflow, including cached lookups and CSV-friendly exports.</p>
-                <div class="hero-stats">
-                    <div class="stat-card"><span class="stat-label">Input formats</span><span class="stat-value">TXT, CSV, JSON, XML, XLSX, XLS</span><span class="stat-note">Plus PDF and common image files</span></div>
-                    <div class="stat-card"><span class="stat-label">Lookup modes</span><span class="stat-value">Single or all IDs</span><span class="stat-note">Group all-ID reports by period</span></div>
-                    <div class="stat-card"><span class="stat-label">Results</span><span class="stat-value">Table + JSON output</span><span class="stat-note">Optional AI assist and totals</span></div>
-                </div>
-            </div>
-            <div class="hero-side">
-                <div class="info-card">
-                    <h3>What changed</h3>
-                    <p>The page now points users to the updated code paths: smarter file parsing, cached history, and a cleaner export flow.</p>
-                </div>
-                <div class="info-card">
-                    <h3>Quick workflow</h3>
-                    <ul class="info-list">
-                        <li>Upload one file per request.</li>
-                        <li>Choose single-ID or all-ID mode.</li>
-                        <li>Optionally enable AI Assist and totals.</li>
-                    </ul>
-                </div>
-            </div>
-        </section>
         <section class="card">
             <div class="owner-banner" role="img" aria-label="Kaytheon LLC ownership logo">
                 <svg class="owner-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
