@@ -235,6 +235,7 @@ HTML_PAGE = """<!doctype html>
                     <datalist id="shipping-id-suggestions">
                         __SHIPPING_ID_OPTIONS__
                     </datalist>
+                    <select id="shipping-id-picker" style="display:none; margin-top:8px; width:100%;" aria-label="Pick a Shipping ID from the uploaded file"></select>
                 </div>
                 <div class="grid" style="margin-top:10px;">
                     <div>
@@ -380,8 +381,17 @@ HTML_PAGE = """<!doctype html>
         function bindFileDrivenSuggestions() {
             const fileInput = document.querySelector('input[name="invoice_file"]');
             const datalist = document.getElementById('shipping-id-suggestions');
+            const picker = document.getElementById('shipping-id-picker');
+            const shippingInput = document.querySelector('input[name="shipping_id"]');
             if (!fileInput || !datalist) {
                 return;
+            }
+            if (picker && shippingInput) {
+                picker.addEventListener('change', () => {
+                    if (picker.value) {
+                        shippingInput.value = picker.value;
+                    }
+                });
             }
             fileInput.addEventListener('change', async () => {
                 const file = fileInput.files && fileInput.files[0];
@@ -405,6 +415,18 @@ HTML_PAGE = """<!doctype html>
                         opt.label = item.date;
                         return opt;
                     }));
+                    if (picker) {
+                        const placeholder = document.createElement('option');
+                        placeholder.value = '';
+                        placeholder.textContent = `\u2014 Pick from file (${payload.ids.length} IDs found) \u2014`;
+                        picker.replaceChildren(placeholder, ...payload.ids.map((item) => {
+                            const opt = document.createElement('option');
+                            opt.value = item.id;
+                            opt.textContent = item.date ? `${item.id} \u2014 ${item.date}` : item.id;
+                            return opt;
+                        }));
+                        picker.style.display = 'block';
+                    }
                 } catch (err) {
                     // keep the history-based suggestions on failure
                 }
