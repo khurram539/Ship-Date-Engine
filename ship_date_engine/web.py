@@ -133,6 +133,7 @@ HTML_PAGE = """<!doctype html>
         .status-pill { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 700; }
         .status-pill[data-state="ready"] { background: rgba(34, 197, 94, 0.12); color: #166534; }
         .status-pill[data-state="busy"] { background: rgba(245, 158, 11, 0.14); color: #92400e; }
+        .status-pill[data-state="down"] { background: rgba(239, 68, 68, 0.12); color: #b91c1c; }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.7); }
         .status-value { margin: 0 0 8px 0; font-size: 17px; font-weight: 700; color: #0f172a; }
         .status-meta { color: #475569; font-size: 13px; line-height: 1.5; }
@@ -234,10 +235,10 @@ HTML_PAGE = """<!doctype html>
                 <div class="info-card live-status-card" aria-live="polite">
                     <div class="status-header">
                         <div class="status-label">Live status</div>
-                        <span class="status-pill" data-state="ready"><span class="status-dot" aria-hidden="true"></span>Ready</span>
+                        <span class="status-pill" data-state="busy"><span class="status-dot" aria-hidden="true"></span>Checking</span>
                     </div>
-                    <p class="status-value" id="live-status-text">Ready for a new lookup</p>
-                    <div class="status-meta"><span id="live-status-subtext">Waiting for input</span> · <span id="live-status-clock">--:--:--</span></div>
+                    <p class="status-value" id="live-status-text">Checking server health</p>
+                    <div class="status-meta"><span id="live-status-subtext">Contacting the server</span> · <span id="live-status-clock">--:--:--</span></div>
                 </div>
                 <div class="info-card">
                     <h3>Quick workflow</h3>
@@ -415,9 +416,23 @@ HTML_PAGE = """<!doctype html>
             }
 
             pill.dataset.state = state;
-            pill.innerHTML = `<span class="status-dot" aria-hidden="true"></span>${state === 'busy' ? 'Busy' : 'Ready'}`;
+            const stateLabels = { busy: 'Checking', down: 'Unavailable', ready: 'Healthy' };
+            pill.innerHTML = `<span class="status-dot" aria-hidden="true"></span>${stateLabels[state] || 'Unknown'}`;
             statusText.textContent = label;
             statusSubtext.textContent = subtext;
+        }
+
+        async function checkServerHealth() {
+            try {
+                const response = await fetch('/health', { cache: 'no-store' });
+                const payload = await response.json();
+                if (!response.ok || !['ok', 'healthy'].includes(payload.status)) {
+                    throw new Error('Health check failed');
+                }
+                updateLiveStatus('Server healthy', 'Health check passed', 'ready');
+            } catch (err) {
+                updateLiveStatus('Server unavailable', 'Health check failed', 'down');
+            }
         }
 
         function updateLiveStatusClock() {
@@ -435,7 +450,6 @@ HTML_PAGE = """<!doctype html>
                 return;
             }
             form.addEventListener('submit', () => {
-                updateLiveStatus('Processing request', 'Analyzing uploaded data', 'busy');
                 showLoadingOverlay();
             });
         }
@@ -485,6 +499,8 @@ HTML_PAGE = """<!doctype html>
 
         updateLiveStatusClock();
         window.setInterval(updateLiveStatusClock, 1000);
+        checkServerHealth();
+        window.setInterval(checkServerHealth, 15000);
         bindLoadingState();
         bindFileDrivenSuggestions();
     </script>
