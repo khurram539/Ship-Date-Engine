@@ -18,7 +18,7 @@ from pathlib import Path
 from .ai_assist import generate_insight
 from .engine import determine_shipping_date_single
 from .extraction import list_shipping_date_records, lookup_shipping_date_record_by_id, research_order_id_in_workbook
-from .output import to_json_output, to_text_output
+from .output import to_json_output
 
 
 RECORDS_PATH = Path(tempfile.gettempdir()) / "ship_date_engine_records.json"
@@ -1102,7 +1102,6 @@ def _build_all_lookup_result_from_file(
 def _format_result(
     invoices, validation, decision, enable_ai: bool, shipping_id: str = ""
 ) -> str:
-    text_output = to_text_output(invoices, validation, decision)
     json_output = to_json_output(invoices, validation, decision)
 
     effective_shipping_id = (
@@ -1129,20 +1128,94 @@ def _format_result(
                 f"<pre>AI assist unavailable: {html.escape(str(exc))}</pre>"
             )
 
-    shipping_id_block = (
-        f"<p><strong>Shipping ID:</strong> {html.escape(effective_shipping_id)}</p>"
+    def _fmt_date(d) -> str:
+        return d.strftime("%m-%d-%Y")
+
+    shipping_id_pill = (
+        "<div class=\"lookup-pill\"><div class=\"label\">Shipping ID</div>"
+        f"<div class=\"value\">{html.escape(effective_shipping_id)}</div></div>"
         if effective_shipping_id
         else ""
+    )
+    pills_block = (
+        "<div class=\"lookup-grid\">"
+        f"{shipping_id_pill}"
+        "<div class=\"lookup-pill\"><div class=\"label\">Final Shipping Date</div>"
+        f"<div class=\"value\">{html.escape(_fmt_date(decision.final_shipping_date))}</div></div>"
+        "<div class=\"lookup-pill\"><div class=\"label\">Earliest Ship Date</div>"
+        f"<div class=\"value\">{html.escape(_fmt_date(decision.earliest_ship_date))}</div></div>"
+        "<div class=\"lookup-pill\"><div class=\"label\">Latest Allowable</div>"
+        f"<div class=\"value\">{html.escape(_fmt_date(decision.latest_allowable_ship_date))}</div></div>"
+        "</div>"
+    )
+
+    decision_rows = "".join(
+        f"<tr><th>Step {i}</th><td>{html.escape(step)}</td></tr>"
+        for i, step in enumerate(decision.explanation, start=1)
+    )
+    if decision.selected_priority_invoice:
+        decision_rows += (
+            "<tr><th>Priority Invoice</th>"
+            f"<td>{html.escape(decision.selected_priority_invoice)}</td></tr>"
+        )
+    decision_block = (
+        "<h4>Decision Details</h4>"
+        f"<table class=\"lookup-table\">{decision_rows}</table>"
+        if decision_rows
+        else ""
+    )
+
+    issue_rows = "".join(
+        f"<tr><th>Error</th><td>{html.escape(e)}</td></tr>" for e in validation.errors
+    )
+    issue_rows += "".join(
+        f"<tr><th>Warning</th><td>{html.escape(w)}</td></tr>" for w in validation.warnings
+    )
+    issue_rows += "".join(
+        f"<tr><th>Conflict</th><td>{html.escape(c)}</td></tr>" for c in decision.conflicts
+    )
+    issues_block = (
+        "<h4>Validation</h4>"
+        f"<table class=\"lookup-table\">{issue_rows}</table>"
+        if issue_rows
+        else ""
+    )
+
+    invoice_rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(Path(inv.source_path).name)}</td>"
+        f"<td>{html.escape(inv.shipping_id or 'N/A')}</td>"
+        f"<td>{html.escape(inv.invoice_number or 'N/A')}</td>"
+        f"<td>{html.escape(inv.po_number or 'N/A')}</td>"
+        f"<td>{inv.priority}</td>"
+        "</tr>"
+        for inv in invoices
+    )
+    invoices_block = (
+        "<h4>Invoices</h4>"
+        "<table class=\"history-table\">"
+        "<tr><th>Source</th><th>Shipping ID</th><th>Invoice #</th><th>PO #</th><th>Priority</th></tr>"
+        f"{invoice_rows}"
+        "</table>"
+        if invoice_rows
+        else ""
+    )
+
+    json_block = (
+        "<details><summary>JSON Output</summary>"
+        f"<pre>{html.escape(json.dumps(json.loads(json_output), indent=2))}</pre>"
+        "</details>"
     )
 
     return (
         "<section class=\"result\">"
-        f"{shipping_id_block}"
-        "<h3>Text Output</h3>"
-        f"<pre>{html.escape(text_output)}</pre>"
-        "<h3>JSON Output</h3>"
-        f"<pre>{html.escape(json.dumps(json.loads(json_output), indent=2))}</pre>"
+        "<h3>Shipping Date Result</h3>"
+        f"{pills_block}"
+        f"{decision_block}"
+        f"{issues_block}"
+        f"{invoices_block}"
         f"{ai_block}"
+        f"{json_block}"
         "</section>"
     )
 
