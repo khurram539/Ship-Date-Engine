@@ -1277,7 +1277,7 @@ def _build_all_lookup_result_from_file(
                     if row["fields"].get(key, "")
                 },
             }
-            for row in money_rows[:10]
+            for row in money_rows[:25]
         ],
     }
     ai_block = _ai_all_lookup_block(ai_report)
