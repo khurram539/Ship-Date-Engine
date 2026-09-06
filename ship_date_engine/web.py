@@ -128,6 +128,14 @@ HTML_PAGE = """<!doctype html>
         .info-card p { margin: 0; line-height: 1.55; }
         .info-list { margin: 10px 0 0; padding-left: 18px; color: var(--muted); }
         .info-list li { margin: 6px 0; }
+        .status-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+        .status-label { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; font-weight: 700; }
+        .status-pill { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 700; }
+        .status-pill[data-state="ready"] { background: rgba(34, 197, 94, 0.12); color: #166534; }
+        .status-pill[data-state="busy"] { background: rgba(245, 158, 11, 0.14); color: #92400e; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.7); }
+        .status-value { margin: 0 0 8px 0; font-size: 17px; font-weight: 700; color: #0f172a; }
+        .status-meta { color: #475569; font-size: 13px; line-height: 1.5; }
         .owner-banner { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: linear-gradient(90deg, #fff 0%, #f8fafc 100%); }
         .owner-mark { width: 56px; height: 56px; flex: 0 0 56px; }
         .owner-text { font-size: 14px; color: #334155; letter-spacing: 0.02em; }
@@ -220,6 +228,14 @@ HTML_PAGE = """<!doctype html>
                         <li>Totals Summary highlights which rows carry the money data.</li>
                         <li>Shipping ID dropdown fills from your file automatically.</li>
                     </ul>
+                </div>
+                <div class="info-card live-status-card" aria-live="polite">
+                    <div class="status-header">
+                        <div class="status-label">Live status</div>
+                        <span class="status-pill" data-state="ready"><span class="status-dot" aria-hidden="true"></span>Ready</span>
+                    </div>
+                    <p class="status-value" id="live-status-text">Ready for a new lookup</p>
+                    <div class="status-meta"><span id="live-status-subtext">Waiting for input</span> · <span id="live-status-clock">--:--:--</span></div>
                 </div>
                 <div class="info-card">
                     <h3>Quick workflow</h3>
@@ -388,12 +404,36 @@ HTML_PAGE = """<!doctype html>
             }, 1000);
         }
 
+        function updateLiveStatus(label, subtext, state) {
+            const pill = document.querySelector('.status-pill');
+            const statusText = document.getElementById('live-status-text');
+            const statusSubtext = document.getElementById('live-status-subtext');
+            if (!pill || !statusText || !statusSubtext) {
+                return;
+            }
+
+            pill.dataset.state = state;
+            pill.innerHTML = `<span class="status-dot" aria-hidden="true"></span>${state === 'busy' ? 'Busy' : 'Ready'}`;
+            statusText.textContent = label;
+            statusSubtext.textContent = subtext;
+        }
+
+        function updateLiveStatusClock() {
+            const clock = document.getElementById('live-status-clock');
+            if (!clock) {
+                return;
+            }
+            const now = new Date();
+            clock.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
         function bindLoadingState() {
             const form = document.getElementById('lookup-form');
             if (!form) {
                 return;
             }
             form.addEventListener('submit', () => {
+                updateLiveStatus('Processing request', 'Analyzing uploaded data', 'busy');
                 showLoadingOverlay();
             });
         }
@@ -441,6 +481,8 @@ HTML_PAGE = """<!doctype html>
             });
         }
 
+        updateLiveStatusClock();
+        window.setInterval(updateLiveStatusClock, 1000);
         bindLoadingState();
         bindFileDrivenSuggestions();
     </script>
