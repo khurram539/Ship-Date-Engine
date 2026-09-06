@@ -223,10 +223,12 @@ HTML_PAGE = """<!doctype html>
                 <div class="info-card">
                     <h3>What changed</h3>
                     <ul class="info-list">
-                        <li>Result tables now mirror the columns in your uploaded Excel.</li>
-                        <li>Single-ID lookups show every matching row across all tabs.</li>
-                        <li>Totals Summary highlights which rows carry the money data.</li>
-                        <li>Shipping ID dropdown fills from your file automatically.</li>
+                        <li>Upload one workbook or invoice and search by a single Shipping ID or across all IDs.</li>
+                        <li>Single-ID lookups now return every matching row across all tabs and worksheets.</li>
+                        <li>All-ID reports support daily, weekly, monthly, quarterly, and annual grouping.</li>
+                        <li>Totals Summary and “Rows With Money Data” highlight the rows that carry numeric values.</li>
+                        <li>Recent lookups, dropdown auto-fill, and SQLite caching reduce repeated re-upload work.</li>
+                        <li>AI Assist runs automatically for a quick summary when a backend is configured.</li>
                     </ul>
                 </div>
                 <div class="info-card live-status-card" aria-live="polite">
