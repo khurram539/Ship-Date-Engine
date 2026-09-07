@@ -1681,13 +1681,28 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--port", type=int, default=8000, help="Port to bind (default: 8000)"
     )
+    parser.add_argument(
+        "--ssl-certfile", default=None, help="Path to TLS certificate (PEM, full chain)"
+    )
+    parser.add_argument(
+        "--ssl-keyfile", default=None, help="Path to TLS private key (PEM)"
+    )
     return parser
 
 
 def main() -> int:
     args = _build_parser().parse_args()
     server = ThreadingHTTPServer((args.host, args.port), ShipDateWebHandler)
-    print(f"Ship Date Engine web UI running at http://{args.host}:{args.port}")
+    scheme = "http"
+    if args.ssl_certfile and args.ssl_keyfile:
+        import ssl
+
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(certfile=args.ssl_certfile, keyfile=args.ssl_keyfile)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        scheme = "https"
+    print(f"Ship Date Engine web UI running at {scheme}://{args.host}:{args.port}")
     server.serve_forever()
     return 0
 
