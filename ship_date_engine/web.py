@@ -1692,7 +1692,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), ShipDateWebHandler)
     scheme = "http"
     if args.ssl_certfile and args.ssl_keyfile:
         import ssl
@@ -1700,8 +1699,27 @@ def main() -> int:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(certfile=args.ssl_certfile, keyfile=args.ssl_keyfile)
-        server.socket = context.wrap_socket(server.socket, server_side=True)
+
+        class TLSServer(ThreadingHTTPServer):
+            # Handshake per connection in the worker thread so a stalled
+            # client cannot block the accept loop.
+            def finish_request(self, request, client_address):
+                request.settimeout(30)
+                tls_sock = context.wrap_socket(request, server_side=True)
+                super().finish_request(tls_sock, client_address)
+
+            def handle_error(self, request, client_address):
+                import sys
+
+                exc = sys.exc_info()[1]
+                if isinstance(exc, (ssl.SSLError, TimeoutError, ConnectionError, OSError)):
+                    return  # ignore handshake failures from bad/plain-HTTP clients
+                super().handle_error(request, client_address)
+
+        server = TLSServer((args.host, args.port), ShipDateWebHandler)
         scheme = "https"
+    else:
+        server = ThreadingHTTPServer((args.host, args.port), ShipDateWebHandler)
     print(f"Ship Date Engine web UI running at {scheme}://{args.host}:{args.port}")
     server.serve_forever()
     return 0
