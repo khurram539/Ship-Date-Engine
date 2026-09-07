@@ -11,6 +11,11 @@ How HTTPS is set up for `https://kplsh000.kaytheon.com:8000/` using an AWS Priva
   - CA expires: 2036-09-07
 - **Server certificate:** issued 2026-09-07, **expires 2027-09-07** (365 days)
 - **TLS termination:** done directly by the Python web server ([ship_date_engine/web.py](ship_date_engine/web.py)) via `--ssl-certfile` / `--ssl-keyfile`. TLS 1.2 minimum. No nginx/reverse proxy.
+- **Status:** live and verified working from external clients as of 2026-09-07.
+
+### Implementation notes
+
+The TLS handshake is performed **per connection in the worker thread** (`TLSServer.finish_request` in [ship_date_engine/web.py](ship_date_engine/web.py)), with a 30-second socket timeout. Do not wrap the listening socket instead — an earlier version did that, and any client that opened a TCP connection without completing a handshake (port scanners, plain-HTTP requests) blocked the accept loop and froze the whole server (browser showed `ERR_TIMED_OUT` even though the process was healthy). Handshake failures from bad clients are silently ignored in `handle_error`.
 
 ## Certificate files
 
@@ -52,6 +57,18 @@ The CA is private, so browsers warn unless the root cert (`ca-chain.crt`) is ins
 - **macOS:** Keychain Access → System → import → set to "Always Trust"
 
 Clients must also resolve `kplsh000.kaytheon.com` (DNS or hosts-file entry).
+
+The CA root is also installed in the **server's own trust store** (`/etc/pki/ca-trust/source/anchors/kaytheon-ca.crt`), so local `curl` works without `--cacert`.
+
+### Testing from the server itself
+
+The hostname resolves to the instance's public IP (`3.232.150.213`), which EC2 cannot reach from inside (no hairpin NAT) — a plain `curl https://kplsh000.kaytheon.com:8000/` from the server will hang. Always add `--resolve`:
+
+```bash
+curl -s --resolve kplsh000.kaytheon.com:8000:127.0.0.1 https://kplsh000.kaytheon.com:8000/health
+```
+
+[refresh_server.sh](refresh_server.sh) already does this for its health check.
 
 ## Renewal (before 2027-09-07)
 
@@ -99,7 +116,9 @@ chmod 600 kplsh000.key
 
 ## Troubleshooting
 
-- **`AccessDeniedException` from ACM-PCA** — check the `AcmPcaIssueCert` statement on the `Ship-date-engine-ec2-role` IAM role.
+- **`AccessDeniedException` from ACM-PCA** — check the `AcmPcaIssueCert` statement on the `Ship-date-engine-ec2-role` IAM role. IAM changes can take a minute to propagate.
 - **Browser "certificate not trusted"** — client is missing the CA root; see [Client trust](#client-trust).
-- **curl hangs** — hostname isn't resolving; use `--resolve kplsh000.kaytheon.com:8000:<server-ip>` or fix DNS.
+- **curl hangs on the server** — hairpin NAT; see [Testing from the server itself](#testing-from-the-server-itself).
+- **Browser `ERR_TIMED_OUT` while local checks pass** — first rule out the security group (`sg-06da2fa552524b2dd`, inbound TCP 8000); test from the client with `curl -vk https://kplsh000.kaytheon.com:8000/health`. If TCP connects but TLS stalls, suspect the accept-loop regression described in [Implementation notes](#implementation-notes).
 - **Service won't start after cert change** — `journalctl -u ship-date-engine -n 50`; usually a bad path or unreadable key file.
+- **`refresh_server.sh` refuses to run** — it requires a clean git tree; commit or stash local changes first.
