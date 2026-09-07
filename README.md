@@ -51,52 +51,20 @@ Then browse to:
 http://<your-server-ip>:8000
 ```
 
-### EC2 hostname deployment
+### Local deployment
 
-The web UI is currently exposed on the EC2 host `KPLSH000` with the DNS name:
+Start the web UI on all network interfaces:
 
-```text
-http://kplsh000.kaytheon.com:8000
+```bash
+cd /home/kkhoja/Code/Ship-Date-Engine
+python3.11 -m ship_date_engine.web --host 0.0.0.0 --port 8000
 ```
 
-The setup is:
+Then browse to:
 
-1. Create an `A` record in the `kaytheon.com` DNS zone:
-
-  ```text
-  Name: kplsh000
-  Type: A
-  Value: <EC2 public or Elastic IP>
-  TTL: 300
-  ```
-
-2. Start the web UI on all network interfaces:
-
-  ```bash
-  cd /home/kkhoja/Code/Ship-Date-Engine
-  python3.11 -m ship_date_engine.web --host 0.0.0.0 --port 8000
-  ```
-
-3. Allow TCP port `8000` in both the EC2 security group's inbound rules and
-  the RHEL firewall:
-
-  ```bash
-  sudo firewall-cmd --permanent --add-port=8000/tcp
-  sudo firewall-cmd --reload
-  ```
-
-4. Verify DNS and the local listener:
-
-  ```bash
-  dig +short kplsh000.kaytheon.com
-  ss -ltnp | grep ':8000'
-  curl --max-time 5 http://127.0.0.1:8000
-  ```
-
-The DNS record must point to a stable Elastic IP in production. A normal EC2
-public IP can change after a stop/start operation. The hostname uses HTTP on
-port `8000`; HTTPS requires a reverse proxy or load balancer with a TLS
-certificate.
+```text
+http://<your-server-ip>:8000
+```
 
 The page supports uploading one invoice/workbook document per request.
 
@@ -152,22 +120,7 @@ A separate FastAPI server exposes upload/lookup endpoints backed by the same SQL
 python run_server.py --host 0.0.0.0 --port 8001
 ```
 
-See [API_DOCS.md](API_DOCS.md) for endpoints.
-
-For the same EC2 deployment, the API is available on port `8001`:
-
-```bash
-python3.11 run_server.py --host 0.0.0.0 --port 8001
-```
-
-Allow TCP `8001` in the EC2 security group and RHEL firewall when external API
-access is required. The main API URLs are:
-
-```text
-http://kplsh000.kaytheon.com:8001/
-http://kplsh000.kaytheon.com:8001/docs
-http://kplsh000.kaytheon.com:8001/health
-```
+See the dedicated endpoint guide in [Endpoints/README_ENDPOINTS.md](Endpoints/README_ENDPOINTS.md) for the API reference and request examples.
 
 ## Test
 
