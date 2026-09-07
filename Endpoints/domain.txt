@@ -1,0 +1,41 @@
+i have 32.195.141.20:8000 to access the website. how i can i add a domain to this? just tell me and do not make no changes. i just want to know how to do it...
+
+5:12 PM
+
+
+Here's the full picture — no changes made:
+
+1. Get a domain
+Buy one from a registrar: AWS Route 53, Namecheap, Cloudflare, GoDaddy, etc. (~$10–15/yr).
+
+2. Make your IP permanent first (important)
+32.195.141.20 will change if the EC2 instance is ever stopped/started. In the AWS console: EC2 → Elastic IPs → Allocate → Associate with your instance. Free while attached to a running instance.
+
+3. Point DNS at the server
+In your registrar/DNS provider, create an A record:
+
+
+Propagates in minutes to a few hours. At this point http://yourdomain.com:8000 would already work — but you don't want the :8000.
+
+4. Remove the :8000 with a reverse proxy (recommended)
+Browsers default to port 80 (HTTP) / 443 (HTTPS). Instead of running your Python app as root on port 80, put nginx (or Caddy) in front:
+
+
+Config concept: nginx listens on 80/443 and forwards to your app at 127.0.0.1:8000:
+
+
+5. Add HTTPS (strongly recommended for a business app)
+Free certificate via Let's Encrypt:
+
+
+Certbot edits nginx for you, sets up the 443 listener, and auto-renews. (Caddy is an alternative that does HTTPS 100% automatically with a 2-line config.)
+
+6. Update the EC2 Security Group
+Open ports 80 and 443 to 0.0.0.0/0
+Close port 8000 to the public (or restrict to your IP) — traffic should only flow through nginx
+End result: users browse https://yourdomain.com, nginx terminates TLS and proxies to your app on localhost:8000, and the systemd service keeps working exactly as it does now. When you want to actually do this, I can set up the nginx config and walk you through the DNS/certbot parts.
+
+5:12 PM
+29s
+•
+Claude Fable 5 • 431.5
