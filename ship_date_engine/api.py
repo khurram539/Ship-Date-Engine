@@ -10,6 +10,17 @@ from .security import ValidationError, sanitize_filename
 app = FastAPI(title="Ship Date Engine API", version="1.0.0")
 
 
+@app.get("/")
+async def root():
+    """Provide a useful response for the service root."""
+    return {
+        "service": "Ship Date Engine API",
+        "status": "healthy",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
