@@ -3,7 +3,7 @@
 set -euo pipefail
 
 REPO_DIR="/home/kkhoja/Code/Ship-Date-Engine"
-HEALTH_URL="https://kplsh000.kaytheon.com:8000/health"
+HEALTH_URL="https://shipdata.kaytheon.com/health"
 CA_CHAIN="/home/kkhoja/tls/ca-chain.crt"
 PROC_PATTERN="ship_date_engine.web"
 
@@ -42,7 +42,7 @@ fi
 echo "==> Waiting for server"
 for i in $(seq 1 15); do
     sleep 2
-    if curl -sf --cacert "$CA_CHAIN" --resolve kplsh000.kaytheon.com:8000:127.0.0.1 -o /dev/null "$HEALTH_URL"; then
+    if curl -sf --cacert "$CA_CHAIN" --resolve shipdata.kaytheon.com:443:127.0.0.1 -o /dev/null "$HEALTH_URL"; then
         NEW_PID=$(pgrep -f "$PROC_PATTERN" || true)
         echo "OK: server healthy (PID ${NEW_PID:-unknown}) at commit $AFTER"
         exit 0
